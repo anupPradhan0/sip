@@ -1,0 +1,20 @@
+{
+  "name": "sip-answering-machine",
+  "version": "1.0.0",
+  "description": "SIP answering machine — auto-answers calls via Asterisk ARI and hangs up after 5 seconds",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "ari-client": "^2.2.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

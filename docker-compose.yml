@@ -1,0 +1,16 @@
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    container_name: asterisk
+    network_mode: host          # host networking so SIP/RTP ports are reachable
+    volumes:
+      - ./docker/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./docker/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./docker/asterisk/ari.conf:/etc/asterisk/ari.conf:ro
+      - ./docker/asterisk/http.conf:/etc/asterisk/http.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
