@@ -1,84 +1,103 @@
-# TypeScript Express Backend
+# Kulloo Backend (Hello-Call Milestone)
 
-Production-ready starter backend with:
+TypeScript + Express + MongoDB backend with first end-to-end `hello-call` contract.
 
-- Language: TypeScript
-- Runtime: Node.js
-- Backend framework: Express.js
-- Database: MongoDB (Mongoose)
-- Validation: Zod
-- Architecture: route -> controller -> service -> repository -> model
-
-## Project Structure
-
-```txt
-src/
-├── app.ts
-├── server.ts
-├── config/
-│   ├── database.ts
-│   └── env.ts
-├── controllers/
-│   └── user.controller.ts
-├── middlewares/
-│   └── error.middleware.ts
-├── models/
-│   └── user.model.ts
-├── repositories/
-│   └── user.repository.ts
-├── routes/
-│   ├── health.routes.ts
-│   ├── index.ts
-│   └── user.routes.ts
-├── services/
-│   └── user.service.ts
-└── utils/
-    └── api-error.ts
-```
+## Stack
+- TypeScript (Node.js runtime)
+- Express.js API
+- MongoDB (Mongoose)
+- Zod validation
+- Optional Twilio/Plivo PSTN adapters
 
 ## Setup
-
 1. Install dependencies:
-
 ```bash
-npm install
+pnpm install
 ```
 
-2. Create environment file:
+2. Start MongoDB:
+```bash
+docker compose -f ../docker-compose.yml up -d --force-recreate
+```
 
+3. Configure env:
 ```bash
 cp .env.example .env
 ```
 
-3. Run in development:
-
+4. Start backend:
 ```bash
-npm run dev
+pnpm run dev
 ```
 
-4. Build and run production:
-
-```bash
-npm run build
-npm start
-```
-
-## API Endpoints
-
+## First Milestone APIs
 Base URL: `http://localhost:5000/api`
 
-- `GET /health` - health check
-- `POST /users` - create user
-- `GET /users` - list users
-- `GET /users/:id` - get user by id
-- `PATCH /users/:id` - update user
-- `DELETE /users/:id` - delete user
+- `POST /calls/inbound/hello`  
+  Inbound flow: receive -> answer -> play -> record -> hangup
+- `POST /calls/outbound/hello`  
+  Outbound flow with `Idempotency-Key` header
+- `GET /calls/:callId/recordings`  
+  List recordings for a call
+- `GET /recordings/:recordingId`  
+  Fetch one recording metadata
+- `POST /calls/callbacks/twilio/recording`  
+  Optional callback to finalize Twilio recording metadata
 
-### Example create payload
+## Sample Requests
+Inbound hello call:
+```bash
+curl -X POST http://localhost:5000/api/calls/inbound/hello \
+  -H "Content-Type: application/json" \
+  -d '{"from":"sip:1001@local","to":"sip:hello@local","provider":"sip-local","recordingEnabled":true}'
+```
 
-```json
-{
-  "name": "John Doe",
-  "email": "john@example.com"
-}
+Outbound hello call (SIP-local):
+```bash
+curl -X POST http://localhost:5000/api/calls/outbound/hello \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: hello-1" \
+  -d '{"from":"sip:1001@local","to":"sip:2001@local","provider":"sip-local","recordingEnabled":true}'
+```
+
+Outbound hello call (Twilio/PSTN):
+```bash
+curl -X POST http://localhost:5000/api/calls/outbound/hello \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: hello-pstn-1" \
+  -d '{"from":"+15550001111","to":"+15550002222","provider":"twilio","recordingEnabled":true}'
+```
+
+Outbound hello call (Plivo/PSTN):
+```bash
+curl -X POST http://localhost:5000/api/calls/outbound/hello \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: hello-pstn-plivo-1" \
+  -d '{"from":"+15550001111","to":"+15550002222","provider":"plivo","recordingEnabled":true}'
+```
+
+## 10-20 Call Verification
+Run repeatability checks with script:
+
+Inbound SIP-like simulation:
+```bash
+pnpm run verify:hello inbound-sip 20 250
+```
+
+Outbound SIP-like simulation:
+```bash
+pnpm run verify:hello outbound-sip 20 250
+```
+
+Outbound PSTN (defaults to Plivo; set `HELLO_CALL_PSTN_PROVIDER=twilio` for Twilio):
+```bash
+HELLO_CALL_FROM="+15550001111" HELLO_CALL_TO="+15550002222" pnpm run verify:hello outbound-pstn 10 1000
+```
+
+Script output includes per-call result and final success rate.
+
+## Build
+```bash
+pnpm run build
+pnpm start
 ```

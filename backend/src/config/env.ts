@@ -2,16 +2,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const requiredVars = ["PORT", "MONGODB_URI"] as const;
-
-for (const envKey of requiredVars) {
-  if (!process.env[envKey]) {
-    throw new Error(`Missing required environment variable: ${envKey}`);
-  }
-}
+const DEFAULT_PORT = 5000;
+const DEFAULT_MONGO_URI = "mongodb://localhost:27017/sip-backend";
 
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
-  port: Number(process.env.PORT ?? 5000),
-  mongoUri: process.env.MONGODB_URI as string,
+  port: Number(process.env.PORT ?? DEFAULT_PORT),
+  mongoUri: process.env.MONGODB_URI ?? DEFAULT_MONGO_URI,
 };

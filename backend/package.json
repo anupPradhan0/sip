@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "verify:hello": "ts-node scripts/repeat-hello-calls.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -15,6 +16,8 @@
     "helmet": "^8.1.0",
     "mongoose": "^8.13.2",
     "morgan": "^1.10.0",
+    "plivo": "^4.75.8",
+    "twilio": "^5.13.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
