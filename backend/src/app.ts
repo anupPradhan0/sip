@@ -58,19 +58,23 @@ function sendPlivoAnswerXml(req: express.Request, res: express.Response): void {
   );
 }
 
-app.get("/plivo/answer", (req, res) => {
-  sendPlivoAnswerXml(req, res);
-});
+function registerPlivoWebhookRoutes(): void {
+  // Plivo may use GET or POST for Answer URL depending on product flow; accept any method.
+  app.all("/plivo/answer", (req, res) => {
+    sendPlivoAnswerXml(req, res);
+  });
+  app.all("/api/plivo/answer", (req, res) => {
+    sendPlivoAnswerXml(req, res);
+  });
 
-app.post("/plivo/answer", (req, res) => {
-  // Plivo may POST call status events to the same URL; we still respond with XML to be safe.
-  sendPlivoAnswerXml(req, res);
-});
+  const hangup = (_req: express.Request, res: express.Response): void => {
+    res.status(200).json({ success: true });
+  };
+  app.post("/plivo/hangup", hangup);
+  app.post("/api/plivo/hangup", hangup);
+}
 
-app.post("/plivo/hangup", (_req, res) => {
-  // Endpoint reserved for Plivo hangup_url in call create.
-  res.status(200).json({ success: true });
-});
+registerPlivoWebhookRoutes();
 
 app.use("/api", apiRouter);
 
