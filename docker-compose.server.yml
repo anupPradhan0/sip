@@ -1,0 +1,76 @@
+# Server stack: MongoDB + Kulloo API (+ optional FreeSWITCH).
+#
+# On your VPS (with repo cloned):
+#   cp backend/.env.example .env
+#   # edit .env — set MONGODB_URI=mongodb://mongodb:27017/sip-backend, PUBLIC_BASE_URL, Plivo/Twilio, etc.
+#   docker compose -f docker-compose.server.yml up -d --build
+#
+# API: http://<host>:5000  — health: GET /api/health
+#
+# FreeSWITCH (SIP/RTP + local recordings): add profile "media" and have ./freeswitch/conf from this repo:
+#   docker compose -f docker-compose.server.yml --profile media up -d --build
+#
+# If you deploy the API with Dokploy only, use this compose for mongodb (+ freeswitch) and point
+# Dokploy env MONGODB_URI at mongodb://<server-ip>:27017/sip-backend or the Docker network hostname
+# if Dokploy joins the same user-defined network.
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: kulloo-mongodb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: sip-backend
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    image: kulloo-backend:local
+    container_name: kulloo-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      MONGODB_URI: mongodb://mongodb:27017/sip-backend
+      RECORDINGS_DIR: /recordings
+    volumes:
+      - recordings_data:/recordings
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  # Optional: SIP media + local WAV recordings (needs ./freeswitch/conf from repo)
+  freeswitch:
+    profiles: ["media"]
+    image: drachtio/drachtio-freeswitch-mrf:latest
+    container_name: kulloo-freeswitch
+    restart: unless-stopped
+    ports:
+      - "8022:8021/tcp"
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "16384-16484:16384-16484/udp"
+    volumes:
+      - ./freeswitch/conf:/etc/freeswitch
+      - recordings_data:/recordings
+
+volumes:
+  mongodb_data:
+  recordings_data:
