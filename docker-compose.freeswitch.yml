@@ -1,0 +1,19 @@
+# FreeSWITCH only — needs ./freeswitch/conf from this repo (clone or copy).
+#
+#   docker compose -f docker-compose.freeswitch.yml up -d
+#
+# SIP: 5060 (udp/tcp) · ESL: host 8022 → container 8021 · RTP: 16384-16484/udp
+
+services:
+  freeswitch:
+    image: drachtio/drachtio-freeswitch-mrf:latest
+    container_name: kulloo-freeswitch
+    restart: unless-stopped
+    ports:
+      - "8022:8021/tcp"
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "16384-16484:16384-16484/udp"
+    volumes:
+      - ./freeswitch/conf:/etc/freeswitch
+      - ./recordings:/recordings
