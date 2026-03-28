@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "../../../utils/api-error";
 import { parseWithSchema } from "../../../utils/zod-validate";
@@ -14,6 +15,59 @@ import {
 import { CallService } from "../services/call.service";
 
 const callService = new CallService();
+
+export async function listLocalRecordings(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const dir = process.env.RECORDINGS_DIR
+      ? path.resolve(process.env.RECORDINGS_DIR)
+      : path.resolve(process.cwd(), "..", "recordings");
+
+    let files: string[] = [];
+    try {
+      const entries = await fs.readdir(dir);
+      files = entries.filter((f) => f.endsWith(".wav"));
+    } catch {
+      // Directory not mounted or empty — return empty list.
+    }
+
+    const recordings = files.map((f) => ({
+      uuid: f.replace(/\.wav$/, ""),
+      filename: f,
+      url: `/api/recordings/local/${f.replace(/\.wav$/, "")}`,
+    }));
+
+    res.status(200).json({ success: true, count: recordings.length, data: recordings });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function localRecordingFile(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const uuid = req.params.uuid?.replace(/\.wav$/i, "");
+    if (!uuid || !/^[\w-]+$/.test(uuid)) {
+      throw new ApiError("Invalid recording UUID", 400);
+    }
+
+    const dir = process.env.RECORDINGS_DIR
+      ? path.resolve(process.env.RECORDINGS_DIR)
+      : path.resolve(process.cwd(), "..", "recordings");
+
+    const filePath = path.join(dir, `${uuid}.wav`);
+
+    try {
+      await fs.stat(filePath);
+    } catch {
+      throw new ApiError("Recording file not found", 404);
+    }
+
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Disposition", `inline; filename="${uuid}.wav"`);
+    res.sendFile(filePath);
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function inboundHelloCall(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
