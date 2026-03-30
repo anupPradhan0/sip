@@ -91,8 +91,10 @@ export class EslCallHandlerService {
         });
       });
 
-      conn.on("esl::event::RECORD_STOP::*", (evt) => {
-        console.log("Recording stopped event received", evt.getHeader("Record-File-Path"));
+      conn.on("esl::event::RECORD_STOP::*", (evt: unknown) => {
+        const eslEvent = evt as { getHeader: (name: string) => string | undefined };
+        const recordFile = eslEvent.getHeader ? eslEvent.getHeader("Record-File-Path") : undefined;
+        console.log("Recording stopped event received", recordFile);
         if (callId && callUuid && recordingPath) {
           this.handleRecordingComplete(callId, callUuid, recordingPath).catch((err) => {
             console.error("Error handling recording completion:", err);
