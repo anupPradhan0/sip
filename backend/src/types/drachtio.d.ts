@@ -88,8 +88,7 @@ declare module "drachtio-fsmrf" {
   import { Srf } from "drachtio-srf";
 
   export interface MediaServerOptions {
-    host: string;
-    port: number;
+    address: string;
     secret: string;
   }
 
