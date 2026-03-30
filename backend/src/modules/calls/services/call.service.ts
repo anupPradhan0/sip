@@ -321,21 +321,10 @@ export class CallService {
       : path.resolve(process.cwd(), "..", "recordings");
     const filePath = path.join(recordingsDir, `${input.callUuid}.wav`);
 
-    // FreeSWITCH can trigger the dialplan callback before the WAV is fully flushed to disk.
-    // Wait briefly for the file to appear to avoid spurious 404s.
-    const maxAttempts = 10;
-    const delayMs = 500;
-    // eslint-disable-next-line no-plusplus
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        await fs.stat(filePath);
-        break;
-      } catch {
-        if (attempt === maxAttempts) {
-          throw new ApiError("Recording file not found yet", 404);
-        }
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
+    try {
+      await fs.stat(filePath);
+    } catch {
+      throw new ApiError("Recording file not found yet", 404);
     }
 
     const recording = await this.recordingRepository.create({
