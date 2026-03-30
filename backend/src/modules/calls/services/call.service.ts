@@ -271,7 +271,77 @@ export class CallService {
       providerRecordingId: callUuid,
       status: "completed",
       filePath,
-      retrievalUrl: `/api/recordings/${callUuid}/file`,
+      retrievalUrl: `/api/recordings/local/${callUuid}`,
+    });
+
+    return recording;
+  }
+
+  async registerFreeswitchRecordingFromCallback(input: {
+    callUuid: string;
+    durationSec?: number;
+    from?: string;
+    to?: string;
+  }): Promise<RecordingDocument> {
+    // Avoid duplicate creation if FreeSWITCH retries the webhook.
+    const existing = await this.recordingRepository.findByProviderRecordingId(input.callUuid);
+    if (existing) {
+      return existing;
+    }
+
+    let call = await this.callRepository.findByProviderCallId(input.callUuid);
+
+    // FreeSWITCH callbacks can arrive without a prior "hello-call" API call,
+    // so we create a minimal Call record to satisfy the recording linkage.
+    if (!call) {
+      const correlationId = randomUUID();
+      const now = new Date();
+      call = await this.callRepository.create({
+        direction: "inbound",
+        provider: "freeswitch",
+        from: input.from ?? "unknown",
+        to: input.to ?? "unknown",
+        status: "completed",
+        correlationId,
+        providerCallId: input.callUuid,
+        recordingEnabled: true,
+        timestamps: {
+          receivedAt: now,
+          completedAt: now,
+        },
+        lastError: undefined,
+      });
+
+      // eslint-disable-next-line no-console
+      console.log(`Created freeswitch Call for recording callback callUuid=${input.callUuid}`);
+    }
+
+    const recordingsDir = process.env.RECORDINGS_DIR
+      ? path.resolve(process.env.RECORDINGS_DIR)
+      : path.resolve(process.cwd(), "..", "recordings");
+    const filePath = path.join(recordingsDir, `${input.callUuid}.wav`);
+
+    try {
+      await fs.stat(filePath);
+    } catch {
+      throw new ApiError("Recording file not found yet", 404);
+    }
+
+    const recording = await this.recordingRepository.create({
+      callId: call._id,
+      provider: "freeswitch",
+      providerRecordingId: input.callUuid,
+      status: "completed",
+      durationSec: input.durationSec,
+      filePath,
+      retrievalUrl: `/api/recordings/local/${input.callUuid}`,
+    });
+
+    await this.callEventRepository.create({
+      callId: call._id,
+      correlationId: call.correlationId,
+      eventType: "recording_completed",
+      payload: { providerRecordingId: input.callUuid },
     });
 
     return recording;

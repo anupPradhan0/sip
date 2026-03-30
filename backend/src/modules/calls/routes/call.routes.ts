@@ -8,6 +8,7 @@ import {
   localRecordingFile,
   outboundHelloCall,
   plivoRecordingCallback,
+  freeswitchRecordingCallback,
   twilioRecordingCallback,
 } from "../controllers/call.controller";
 
@@ -18,6 +19,7 @@ callRouter.post("/outbound/hello", outboundHelloCall);
 callRouter.get("/:callId/recordings", listCallRecordings);
 callRouter.post("/callbacks/twilio/recording", twilioRecordingCallback);
 callRouter.post("/callbacks/plivo/recording", plivoRecordingCallback);
+callRouter.post("/callbacks/freeswitch/recording", freeswitchRecordingCallback);
 
 export const recordingRouter = Router();
 recordingRouter.get("/local", listLocalRecordings);

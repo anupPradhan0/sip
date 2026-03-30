@@ -2,6 +2,8 @@
   <!-- Public IPv4 of this VPS — required so Plivo gets correct Contact/RTP (Docker NAT). -->
   <X-PRE-PROCESS cmd="set" data="external_sip_ip=148.135.138.190"/>
   <X-PRE-PROCESS cmd="set" data="domain=$${external_sip_ip}"/>
+  <!-- FreeSWITCH -> Kulloo backend callback for recording completion -->
+  <X-PRE-PROCESS cmd="set" data="kulloo_recording_webhook_url=https://kulloocall.anuppradhan.in/api/callbacks/freeswitch/recording"/>
   <X-PRE-PROCESS cmd="set" data="global_codec_prefs=OPUS,PCMU,PCMA"/>
   <X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=OPUS,PCMU,PCMA"/>
   <X-PRE-PROCESS cmd="set" data="rtp_start_port=16384"/>

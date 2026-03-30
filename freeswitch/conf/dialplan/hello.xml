@@ -10,6 +10,9 @@
         <action application="record_session" data="${recording_path}"/>
         <action application="sleep" data="20000"/>
         <action application="stop_record_session" data="${recording_path}"/>
+        <!-- Notify Kulloo backend so it can persist recording metadata in MongoDB -->
+        <action application="set" data="curl_timeout=5"/>
+        <action application="curl" data="${kulloo_recording_webhook_url} post callUuid=${uuid}&amp;durationSec=20"/>
         <action application="hangup"/>
       </condition>
     </extension>

@@ -10,6 +10,7 @@ import {
   plivoRecordingCallbackQuerySchema,
   plivoRecordingCallbackSchema,
   recordingIdParamSchema,
+  freeswitchRecordingCallbackSchema,
   twilioRecordingCallbackSchema,
 } from "../validators/call.schema";
 import { CallService } from "../services/call.service";
@@ -144,6 +145,28 @@ export async function plivoRecordingCallback(req: Request, res: Response, next: 
     const { callUuid } = parseWithSchema(plivoRecordingCallbackQuerySchema, req.query);
     const payload = parseWithSchema(plivoRecordingCallbackSchema, req.body);
     const recording = await callService.ingestPlivoRecordingCallback(callUuid, payload);
+    res.status(200).json({ success: true, data: recording });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function freeswitchRecordingCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const payload = parseWithSchema(freeswitchRecordingCallbackSchema, req.body);
+
+    const durationSec =
+      typeof payload.durationSec === "string" && payload.durationSec.trim().length > 0
+        ? Number(payload.durationSec)
+        : undefined;
+
+    const recording = await callService.registerFreeswitchRecordingFromCallback({
+      callUuid: payload.callUuid,
+      durationSec,
+      from: payload.from,
+      to: payload.to,
+    });
+
     res.status(200).json({ success: true, data: recording });
   } catch (error) {
     next(error);

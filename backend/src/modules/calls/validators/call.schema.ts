@@ -44,5 +44,12 @@ export const plivoRecordingCallbackQuerySchema = z.object({
   callUuid: z.string().trim().min(1),
 });
 
+export const freeswitchRecordingCallbackSchema = z.object({
+  callUuid: z.string().trim().min(1),
+  durationSec: z.string().trim().optional(),
+  from: z.string().trim().optional(),
+  to: z.string().trim().optional(),
+});
+
 export type InboundHelloInput = z.infer<typeof inboundHelloSchema>;
 export type OutboundHelloInput = z.infer<typeof outboundHelloSchema>;
