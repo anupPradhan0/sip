@@ -34,15 +34,15 @@ export class FreeswitchMrfService {
     this.isConnecting = true;
 
     try {
-      console.log(`Connecting to FreeSWITCH at ${this.config.host}:${this.config.port}...`);
+      const address = `${this.config.host}:${this.config.port}`;
+      console.log(`Connecting to FreeSWITCH at ${address}...`);
       
       if (!this.mrf) {
         throw new Error("MRF not initialized");
       }
 
       const ms = await this.mrf.connect({
-        host: this.config.host,
-        port: this.config.port,
+        address,
         secret: this.config.secret,
       });
 
