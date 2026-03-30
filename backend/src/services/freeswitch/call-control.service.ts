@@ -100,7 +100,10 @@ export class CallControlService {
   detectDTMF(endpoint: Endpoint, callback: DtmfCallback): void {
     console.log(`Setting up DTMF detection on endpoint ${endpoint.uuid}`);
 
-    const handleDtmf = (evt: Record<string, unknown>) => {
+    const handleDtmf = (...args: unknown[]) => {
+      const evt = args[0] as Record<string, unknown> | undefined;
+      if (!evt) return;
+      
       const digit = evt.digit || evt["DTMF-Digit"];
       if (digit) {
         console.log(`DTMF detected on ${endpoint.uuid}: ${digit}`);

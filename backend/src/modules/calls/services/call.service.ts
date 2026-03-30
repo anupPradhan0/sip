@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Types } from "mongoose";
 import { ApiError } from "../../../utils/api-error";
 import { CallEventRepository } from "../repositories/call-event.repository";
 import { CallRepository } from "../repositories/call.repository";
@@ -380,7 +381,7 @@ export class CallService {
 
   async pushEvent(call: CallDocument | { _id: unknown; correlationId: string }, eventType: string, payload?: Record<string, unknown>): Promise<void> {
     await this.callEventRepository.create({
-      callId: call._id,
+      callId: call._id as Types.ObjectId,
       correlationId: call.correlationId,
       eventType,
       payload,
