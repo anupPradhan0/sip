@@ -75,7 +75,7 @@ export class EslCallHandlerService {
         toRaw: string | null;
         callerName: string | null;
       }>((resolve) => {
-        conn.api("connect", (evt) => {
+        conn.sendRecv("connect", (evt) => {
           const body = evt.getBody();
           console.log("Received connect response, parsing channel data...");
           console.log("Connect response body (first 1000 chars):", body.substring(0, 1000));
