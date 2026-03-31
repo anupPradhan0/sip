@@ -156,6 +156,36 @@ export class EslCallHandlerService {
     });
   }
 
+  private waitForDtmf1(conn: Connection, timeoutMs: number): Promise<"dtmf-1" | "timeout"> {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (result: "dtmf-1" | "timeout") => {
+        if (done) return;
+        done = true;
+        conn.off("esl::event::DTMF::*", onDtmf);
+        conn.off("esl::event::CHANNEL_DTMF::*", onDtmf);
+        clearTimeout(timer);
+        resolve(result);
+      };
+
+      const onDtmf = (evt: unknown) => {
+        const eslEvent = evt as { getHeader?: (name: string) => string | undefined };
+        const digit =
+          (eslEvent.getHeader ? eslEvent.getHeader("DTMF-Digit") : undefined) ??
+          (eslEvent.getHeader ? eslEvent.getHeader("digit") : undefined) ??
+          (eslEvent.getHeader ? eslEvent.getHeader("Key") : undefined);
+        if (!digit) return;
+        const d = String(digit).trim();
+        if (d === "1") finish("dtmf-1");
+      };
+
+      conn.on("esl::event::DTMF::*", onDtmf);
+      conn.on("esl::event::CHANNEL_DTMF::*", onDtmf);
+
+      const timer = setTimeout(() => finish("timeout"), timeoutMs);
+    });
+  }
+
   constructor(options: EslCallHandlerOptions) {
     this.port = options.port;
     this.host = options.host || "0.0.0.0";
@@ -425,11 +455,33 @@ export class EslCallHandlerService {
       conn.execute("record_session", recordingPath, () => {});
       console.log(`Recording started: ${recordingPath}`);
 
-      await this.execAndWait(conn, "sleep", "20000");
-      console.log("Recording duration complete");
+      // Enable DTMF events so we can stop early on "1"
+      conn.send("event plain DTMF");
+      conn.send("event plain CHANNEL_DTMF");
+
+      const outcome = await Promise.race([
+        this.waitForDtmf1(conn, 20000),
+        (async () => {
+          await this.execAndWait(conn, "sleep", "20000");
+          return "timeout" as const;
+        })(),
+      ]);
+
+      if (outcome === "dtmf-1") {
+        console.log("DTMF 1 received: stopping recording early");
+        await this.callService.pushEvent(call, "dtmf", { digit: "1" });
+        await this.callService.setStatus(callId, "recording_stopping", { recordingStoppingAt: new Date() });
+      } else {
+        console.log("Recording duration complete");
+      }
 
       await this.execAndWait(conn, "stop_record_session", recordingPath);
       console.log("Recording stopped");
+
+      if (outcome === "dtmf-1") {
+        // Confirmation tone (no external sound files required)
+        await this.execAndWait(conn, "playback", "tone_stream://%(200,0,880)");
+      }
 
       console.log(`Call flow setup completed for ${input.callUuid}`);
       return { callId, recordingPath };
