@@ -18,28 +18,34 @@ export class EslCallHandlerService {
   private host: string;
   private recordingsDir: string;
 
-  private async sendRecvAsync(conn: Connection, command: string): Promise<string> {
-    return await new Promise<string>((resolve, reject) => {
+  private async sendRecvAsync(conn: Connection, command: string): Promise<{ body: string; replyText?: string }> {
+    return await new Promise<{ body: string; replyText?: string }>((resolve, reject) => {
       conn.sendRecv(command, (evt: any) => {
         const body = typeof evt?.getBody === "function" ? String(evt.getBody() ?? "") : "";
-        if (body.startsWith("-ERR")) return reject(new Error(body));
-        resolve(body);
+        const replyText = typeof evt?.getHeader === "function" ? (evt.getHeader("Reply-Text") as string | undefined) : undefined;
+        const errText = (replyText && replyText.startsWith("-ERR")) ? replyText : (body && body.startsWith("-ERR") ? body : "");
+        if (errText) return reject(new Error(errText));
+        resolve({ body, replyText });
       });
     });
   }
 
   private async getVar(conn: Connection, name: string): Promise<string | null> {
     try {
-      const body = (await this.sendRecvAsync(conn, `getvar ${name}`)).trim();
-      // modesl/freeswitch commonly returns just the value, but be defensive.
-      if (!body || body === "_undef_" || body === "UNDEF") return null;
-      const idx = body.indexOf(":");
-      if (idx > 0) {
-        const maybeKey = body.slice(0, idx).trim();
-        const maybeVal = body.slice(idx + 1).trim();
-        if (maybeKey === name) return maybeVal || null;
+      const { body, replyText } = await this.sendRecvAsync(conn, `getvar ${name}`);
+      const raw = (body || replyText || "").trim();
+
+      // FreeSWITCH commonly returns: "+OK <value>" in Reply-Text
+      const text = (replyText ?? "").trim();
+      if (text.startsWith("+OK")) {
+        const val = text.slice(3).trim();
+        if (!val || val === "_undef_" || val === "UNDEF") return null;
+        return val;
       }
-      return body;
+
+      // Sometimes value comes in body.
+      if (!raw || raw === "_undef_" || raw === "UNDEF") return null;
+      return raw;
     } catch {
       return null;
     }
