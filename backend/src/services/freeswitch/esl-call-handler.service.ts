@@ -60,45 +60,43 @@ export class EslCallHandlerService {
     let recordingPath: string | null = null;
 
     try {
-      await new Promise<void>((resolve) => {
-        conn.on("esl::ready", () => {
-          console.log("ESL connection ready");
-          resolve();
-        });
-      });
-
-      // CRITICAL: Send 'connect' first - required for outbound event socket
-      // FreeSWITCH waits for this command before allowing call control
+      // Wait for connection ready and get initial channel data
       const connectData = await new Promise<{
         callUuid: string;
         fromRaw: string | null;
         toRaw: string | null;
         callerName: string | null;
       }>((resolve) => {
-        conn.sendRecv("connect", (evt) => {
-          const body = evt.getBody();
-          console.log("Received connect response, parsing channel data...");
-          console.log("Connect response body (first 1000 chars):", body.substring(0, 1000));
+        conn.on("esl::ready", () => {
+          console.log("ESL connection ready");
+          
+          // In outbound mode, FreeSWITCH sends channel data immediately
+          // Access it via getInfo() which returns the initial headers
+          const info = (conn as any).getInfo();
+          console.log("Channel info received from FreeSWITCH");
+          console.log("Available headers:", Object.keys(info || {}).slice(0, 20).join(", "));
 
-          // Parse headers from connect response
+          // Parse headers from initial channel data
           const getHeader = (name: string): string | null => {
-            const regex = new RegExp(`^${name}:\\s*(.*)$`, "m");
-            const match = body.match(regex);
-            return match ? match[1].trim() : null;
+            return info && info[name] ? String(info[name]) : null;
           };
 
-          const uuid = getHeader("Channel-Call-UUID") || getHeader("Unique-ID") || randomUUID();
+          const uuid = 
+            getHeader("Channel-Call-UUID") || 
+            getHeader("Unique-ID") || 
+            getHeader("variable_uuid") ||
+            randomUUID();
           
           const fromRaw =
-            getHeader("variable_effective_caller_id_number") ||
             getHeader("Caller-Caller-ID-Number") ||
+            getHeader("variable_effective_caller_id_number") ||
             getHeader("variable_caller_id_number") ||
             getHeader("variable_sip_from_user") ||
             null;
 
           const toRaw =
-            getHeader("variable_effective_callee_id_number") ||
             getHeader("Caller-Destination-Number") ||
+            getHeader("variable_effective_callee_id_number") ||
             getHeader("variable_destination_number") ||
             getHeader("variable_sip_to_user") ||
             getHeader("variable_sip_req_user") ||
@@ -110,14 +108,14 @@ export class EslCallHandlerService {
             getHeader("variable_effective_caller_id_name") ||
             null;
 
-          console.log(`Parsed call - UUID: ${uuid}, From: ${fromRaw || "unknown"}, To: ${toRaw || "unknown"}`);
+          console.log(`Parsed call - UUID: ${uuid}, From: ${fromRaw || "unknown"}, To: ${toRaw || "unknown"}, Name: ${callerName || "N/A"}`);
           resolve({ callUuid: uuid, fromRaw, toRaw, callerName });
         });
       });
 
       callUuid = connectData.callUuid;
 
-      // Subscribe to events after connect
+      // Subscribe to channel events
       conn.send("myevents");
       console.log("Subscribed to channel events with myevents");
 
