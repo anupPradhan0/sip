@@ -18,6 +18,16 @@ export class EslCallHandlerService {
   private host: string;
   private recordingsDir: string;
 
+  private async apiAsync(conn: Connection, command: string): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      conn.api(command, (evt: any) => {
+        const body = typeof evt?.getBody === "function" ? String(evt.getBody() ?? "") : "";
+        if (body.startsWith("-ERR")) return reject(new Error(body));
+        resolve(body);
+      });
+    });
+  }
+
   private pickFirstNonEmpty(...values: Array<string | null | undefined>): string | null {
     for (const v of values) {
       if (v == null) continue;
@@ -65,6 +75,21 @@ export class EslCallHandlerService {
     );
 
     return { callUuid, fromRaw, toRaw, callerName };
+  }
+
+  private parseHeaderLines(lines: unknown): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!Array.isArray(lines)) return out;
+    for (const item of lines) {
+      if (typeof item !== "string") continue;
+      const idx = item.indexOf(":");
+      if (idx <= 0) continue;
+      const key = item.slice(0, idx).trim();
+      const val = item.slice(idx + 1).trim();
+      if (!key) continue;
+      out[key] = val;
+    }
+    return out;
   }
 
   private async execAndWait(conn: Connection, app: string, arg = ""): Promise<void> {
@@ -152,13 +177,19 @@ export class EslCallHandlerService {
           // In outbound mode, FreeSWITCH sends channel data immediately
           // Access it via getInfo() which returns the initial headers
           const info = (conn as any).getInfo();
-          const headers = (info && typeof info === "object" && "headers" in info) ? (info.headers as Record<string, unknown>) : (info as Record<string, unknown> | null);
+          // modesl getInfo() varies by version; headers may be an array of header lines.
+          const rawHeaders =
+            info && typeof info === "object" && "headers" in info ? (info.headers as unknown) : (info as unknown);
+          const headersObj =
+            rawHeaders && typeof rawHeaders === "object" && !Array.isArray(rawHeaders)
+              ? (rawHeaders as Record<string, unknown>)
+              : this.parseHeaderLines(rawHeaders);
           console.log("Channel info received from FreeSWITCH");
-          console.log("Available headers:", Object.keys(headers || {}).slice(0, 20).join(", "));
+          console.log("Available headers:", Object.keys(headersObj || {}).slice(0, 20).join(", "));
 
           // Parse headers from initial channel data
           const getHeader = (name: string): string | null => {
-            return headers && headers[name] != null ? String(headers[name]) : null;
+            return headersObj && headersObj[name] != null ? String(headersObj[name]) : null;
           };
 
           const parsed = this.parseChannelHeaders(getHeader);
@@ -202,10 +233,57 @@ export class EslCallHandlerService {
 
       callUuid = connectData.callUuid;
 
+      // Reliable fallback: query FreeSWITCH for vars if caller/callee still missing.
+      // This avoids "unknown" when upstream SIP headers aren't present in the initial connect headers.
+      let fromRaw = connectData.fromRaw;
+      let toRaw = connectData.toRaw;
+      let callerName = connectData.callerName;
+
+      if (callUuid && (!fromRaw || !toRaw)) {
+        try {
+          const readVar = async (varName: string): Promise<string | null> => {
+            const val = (await this.apiAsync(conn, `uuid_getvar ${callUuid} ${varName}`)).trim();
+            if (!val || val === "_undef_" || val === "UNDEF") return null;
+            return val;
+          };
+
+          fromRaw =
+            fromRaw ??
+            (await readVar("effective_caller_id_number")) ??
+            (await readVar("caller_id_number")) ??
+            (await readVar("sip_from_user"));
+
+          toRaw =
+            toRaw ??
+            (await readVar("destination_number")) ??
+            (await readVar("effective_callee_id_number")) ??
+            (await readVar("sip_to_user")) ??
+            (await readVar("sip_req_user"));
+
+          callerName =
+            callerName ??
+            (await readVar("effective_caller_id_name")) ??
+            (await readVar("caller_id_name"));
+
+          if (fromRaw || toRaw || callerName) {
+            console.log(
+              `Parsed(uuid_getvar) - UUID: ${callUuid}, From: ${fromRaw || "unknown"}, To: ${toRaw || "unknown"}, Name: ${callerName || "N/A"}`,
+            );
+          }
+        } catch (err) {
+          console.error("uuid_getvar fallback failed:", err);
+        }
+      }
+
       const fromE164 = connectData.fromRaw ? toE164BestEffort(connectData.fromRaw) : undefined;
       const toE164 = connectData.toRaw ? toE164BestEffort(connectData.toRaw) : undefined;
 
-      console.log(`Processing call ${callUuid} from ${fromE164 || connectData.fromRaw || "unknown"} to ${toE164 || connectData.toRaw || "unknown"}`);
+      const finalFromE164 = fromRaw ? toE164BestEffort(fromRaw) : undefined;
+      const finalToE164 = toRaw ? toE164BestEffort(toRaw) : undefined;
+
+      console.log(
+        `Processing call ${callUuid} from ${finalFromE164 || fromRaw || "unknown"} to ${finalToE164 || toRaw || "unknown"}`,
+      );
 
       // Set up event listeners before executing call flow
       conn.on("esl::event::RECORD_STOP::*", (evt: unknown) => {
@@ -238,11 +316,11 @@ export class EslCallHandlerService {
       // Execute call flow
       const result = await this.executeCallFlow(conn, {
         callUuid: connectData.callUuid,
-        fromRaw: connectData.fromRaw,
-        toRaw: connectData.toRaw,
-        fromE164,
-        toE164,
-        callerName: connectData.callerName ?? undefined,
+        fromRaw,
+        toRaw,
+        fromE164: finalFromE164,
+        toE164: finalToE164,
+        callerName: callerName ?? undefined,
       });
       
       callId = result.callId;
