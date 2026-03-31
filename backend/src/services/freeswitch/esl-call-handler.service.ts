@@ -78,6 +78,7 @@ export class EslCallHandlerService {
         conn.api("connect", (evt) => {
           const body = evt.getBody();
           console.log("Received connect response, parsing channel data...");
+          console.log("Connect response body (first 1000 chars):", body.substring(0, 1000));
 
           // Parse headers from connect response
           const getHeader = (name: string): string | null => {
