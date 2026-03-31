@@ -19,6 +19,11 @@ export interface CallDocument {
   provider: CallProvider;
   from: string;
   to: string;
+  fromRaw?: string;
+  toRaw?: string;
+  fromE164?: string;
+  toE164?: string;
+  callerName?: string;
   status: CallStatus;
   correlationId: string;
   providerCallId?: string;
@@ -45,6 +50,11 @@ const callSchema = new Schema<CallDocument>(
     provider: { type: String, enum: ["sip-local", "twilio", "plivo", "freeswitch"], required: true },
     from: { type: String, required: true, trim: true },
     to: { type: String, required: true, trim: true },
+    fromRaw: { type: String, trim: true },
+    toRaw: { type: String, trim: true },
+    fromE164: { type: String, trim: true },
+    toE164: { type: String, trim: true },
+    callerName: { type: String, trim: true },
     status: { type: String, required: true },
     correlationId: { type: String, required: true, index: true },
     providerCallId: { type: String, trim: true },

@@ -19,9 +19,7 @@ const callService = new CallService();
 
 export async function listLocalRecordings(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const dir = process.env.RECORDINGS_DIR
-      ? path.resolve(process.env.RECORDINGS_DIR)
-      : path.resolve(process.cwd(), "..", "recordings");
+    const dir = path.resolve(process.env.RECORDINGS_DIR ?? "/recordings");
 
     let files: string[] = [];
     try {
@@ -50,9 +48,7 @@ export async function localRecordingFile(req: Request, res: Response, next: Next
       throw new ApiError("Invalid recording UUID", 400);
     }
 
-    const dir = process.env.RECORDINGS_DIR
-      ? path.resolve(process.env.RECORDINGS_DIR)
-      : path.resolve(process.cwd(), "..", "recordings");
+    const dir = path.resolve(process.env.RECORDINGS_DIR ?? "/recordings");
 
     const filePath = path.join(dir, `${uuid}.wav`);
 

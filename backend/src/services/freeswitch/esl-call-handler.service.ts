@@ -2,6 +2,7 @@ import { Server as EslServer, Connection } from "modesl";
 import { CallService } from "../../modules/calls/services/call.service";
 import { randomUUID } from "crypto";
 import path from "path";
+import { toE164BestEffort } from "../../utils/phone-normalize";
 
 export interface EslCallHandlerOptions {
   port: number;
@@ -20,7 +21,7 @@ export class EslCallHandlerService {
   constructor(options: EslCallHandlerOptions) {
     this.port = options.port;
     this.host = options.host || "0.0.0.0";
-    this.recordingsDir = options.recordingsDir || path.resolve(process.cwd(), "..", "recordings");
+    this.recordingsDir = options.recordingsDir || "/recordings";
     this.callService = new CallService();
   }
 
@@ -57,6 +58,9 @@ export class EslCallHandlerService {
     let callUuid: string | null = null;
     let callId: string | null = null;
     let recordingPath: string | null = null;
+    let fromRaw: string | null = null;
+    let toRaw: string | null = null;
+    let callerName: string | null = null;
 
     try {
       await new Promise<void>((resolve) => {
@@ -66,29 +70,54 @@ export class EslCallHandlerService {
         });
       });
 
-      conn.subscribe(["CHANNEL_ANSWER", "CHANNEL_HANGUP", "RECORD_STOP"], () => {
+      conn.subscribe(["CHANNEL_DATA", "CHANNEL_ANSWER", "CHANNEL_HANGUP", "RECORD_STOP"], () => {
         console.log("Subscribed to ESL events");
       });
 
-      conn.api("uuid_dump", (evt) => {
-        const body = evt.getBody();
-        
-        const uuidMatch = body.match(/Channel-Call-UUID:\s*([^\s]+)/);
-        const fromMatch = body.match(/Caller-Caller-ID-Number:\s*([^\s]+)/);
-        const toMatch = body.match(/Caller-Destination-Number:\s*([^\s]+)/);
-        
-        callUuid = uuidMatch ? uuidMatch[1] : randomUUID();
-        const from = fromMatch ? fromMatch[1] : "unknown";
-        const to = toMatch ? toMatch[1] : "unknown";
+      // In ESL outbound mode, FreeSWITCH sends initial CHANNEL_DATA with all important headers.
+      conn.on("esl::event::CHANNEL_DATA::*", (evt: unknown) => {
+        const eslEvent = evt as { getHeader?: (name: string) => string | undefined };
+        const getHeader = (name: string): string | undefined => (eslEvent.getHeader ? eslEvent.getHeader(name) : undefined);
+
+        const uuid =
+          getHeader("Channel-Call-UUID") ||
+          getHeader("Unique-ID") ||
+          getHeader("variable_uuid") ||
+          randomUUID();
+
+        const effectiveCaller =
+          getHeader("variable_effective_caller_id_number") || getHeader("variable_caller_id_number") || getHeader("Caller-Caller-ID-Number");
+        const effectiveCallee =
+          getHeader("variable_effective_callee_id_number") || getHeader("variable_destination_number") || getHeader("Caller-Destination-Number");
+
+        const sipFromUser = getHeader("variable_sip_from_user");
+        const sipToUser = getHeader("variable_sip_to_user");
+
+        callUuid = uuid;
+        fromRaw = effectiveCaller || sipFromUser || null;
+        toRaw = effectiveCallee || sipToUser || null;
+        callerName = getHeader("Caller-Caller-ID-Name") || getHeader("variable_caller_id_name") || null;
+
+        const from = fromRaw ?? "unknown";
+        const to = toRaw ?? "unknown";
 
         console.log(`Processing call ${callUuid} from ${from} to ${to}`);
 
-        this.executeCallFlow(conn, callUuid, from, to).then((result) => {
-          callId = result.callId;
-          recordingPath = result.recordingPath;
-        }).catch((err) => {
-          console.error("Error executing call flow:", err);
-        });
+        this.executeCallFlow(conn, {
+          callUuid,
+          fromRaw,
+          toRaw,
+          fromE164: fromRaw ? toE164BestEffort(fromRaw) : undefined,
+          toE164: toRaw ? toE164BestEffort(toRaw) : undefined,
+          callerName: callerName ?? undefined,
+        })
+          .then((result) => {
+            callId = result.callId;
+            recordingPath = result.recordingPath;
+          })
+          .catch((err) => {
+            console.error("Error executing call flow:", err);
+          });
       });
 
       conn.on("esl::event::RECORD_STOP::*", (evt: unknown) => {
@@ -122,9 +151,21 @@ export class EslCallHandlerService {
     }
   }
 
-  private async executeCallFlow(conn: Connection, callUuid: string, from: string, to: string): Promise<{ callId: string; recordingPath: string }> {
+  private async executeCallFlow(
+    conn: Connection,
+    input: {
+      callUuid: string;
+      fromRaw: string | null;
+      toRaw: string | null;
+      fromE164?: string;
+      toE164?: string;
+      callerName?: string;
+    },
+  ): Promise<{ callId: string; recordingPath: string }> {
     try {
-      console.log(`Executing call flow for ${callUuid} (${from} -> ${to})`);
+      const from = input.fromE164 ?? input.fromRaw ?? "unknown";
+      const to = input.toE164 ?? input.toRaw ?? "unknown";
+      console.log(`Executing call flow for ${input.callUuid} (${from} -> ${to})`);
 
       const correlationId = randomUUID();
       const now = new Date();
@@ -134,16 +175,29 @@ export class EslCallHandlerService {
         provider: "freeswitch",
         from,
         to,
+        fromRaw: input.fromRaw ?? undefined,
+        toRaw: input.toRaw ?? undefined,
+        fromE164: input.fromE164,
+        toE164: input.toE164,
+        callerName: input.callerName,
         status: "received",
         correlationId,
-        providerCallId: callUuid,
+        providerCallId: input.callUuid,
         recordingEnabled: true,
         timestamps: { receivedAt: now },
       });
 
       const callId = call._id.toString();
 
-      await this.callService.pushEvent(call, "received", { from, to, callUuid });
+      await this.callService.pushEvent(call, "received", {
+        from,
+        to,
+        fromRaw: input.fromRaw ?? undefined,
+        toRaw: input.toRaw ?? undefined,
+        fromE164: input.fromE164,
+        toE164: input.toE164,
+        callUuid: input.callUuid,
+      });
 
       conn.execute("answer", "", () => {
         console.log("Call answered");
@@ -163,7 +217,7 @@ export class EslCallHandlerService {
       await this.callService.setStatus(callId, "played", { playedAt: new Date() });
       await this.callService.pushEvent(call, "played", { message: "Tone played" });
 
-      const recordingPath = path.join(this.recordingsDir, `${callUuid}.wav`);
+      const recordingPath = path.join(path.resolve(this.recordingsDir), `${input.callUuid}.wav`);
       
       await this.callService.setStatus(callId, "recording_started", { recordingStartedAt: new Date() });
       await this.callService.pushEvent(call, "recording_started");
@@ -180,7 +234,7 @@ export class EslCallHandlerService {
         console.log("Recording stopped");
       });
 
-      console.log(`Call flow setup completed for ${callUuid}`);
+      console.log(`Call flow setup completed for ${input.callUuid}`);
       return { callId, recordingPath };
     } catch (error) {
       console.error("Error in call flow execution:", error);
