@@ -28,4 +28,5 @@ services:
     volumes:
       # Mount our hello dialplan as mrf.xml so FreeSWITCH loads it
       - ./freeswitch/conf/dialplan/hello.xml:/usr/local/freeswitch/conf/dialplan/mrf.xml
-      - ./recordings:/recordings
+      # Mount shared recordings directory (absolute path for Dokploy)
+      - /var/lib/kulloo-recordings:/recordings
