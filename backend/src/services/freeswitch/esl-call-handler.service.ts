@@ -18,6 +18,55 @@ export class EslCallHandlerService {
   private host: string;
   private recordingsDir: string;
 
+  private pickFirstNonEmpty(...values: Array<string | null | undefined>): string | null {
+    for (const v of values) {
+      if (v == null) continue;
+      const s = String(v).trim();
+      if (s) return s;
+    }
+    return null;
+  }
+
+  private parseChannelHeaders(
+    getHeader: (name: string) => string | null,
+  ): { callUuid: string; fromRaw: string | null; toRaw: string | null; callerName: string | null } {
+    const callUuid =
+      this.pickFirstNonEmpty(
+        getHeader("Channel-Call-UUID"),
+        getHeader("Unique-ID"),
+        getHeader("variable_uuid"),
+      ) ?? randomUUID();
+
+    const fromRaw = this.pickFirstNonEmpty(
+      getHeader("Caller-Caller-ID-Number"),
+      getHeader("variable_effective_caller_id_number"),
+      getHeader("variable_caller_id_number"),
+      getHeader("variable_sip_from_user"),
+      getHeader("variable_sip_p_asserted_identity"),
+      getHeader("variable_sip_rpid"),
+      getHeader("variable_sip_from_uri"),
+      getHeader("variable_plivo_from"), // if present
+    );
+
+    const toRaw = this.pickFirstNonEmpty(
+      getHeader("Caller-Destination-Number"),
+      getHeader("variable_effective_callee_id_number"),
+      getHeader("variable_destination_number"),
+      getHeader("variable_sip_to_user"),
+      getHeader("variable_sip_req_user"),
+      getHeader("variable_sip_to_uri"),
+      getHeader("variable_plivo_to"), // if present
+    );
+
+    const callerName = this.pickFirstNonEmpty(
+      getHeader("Caller-Caller-ID-Name"),
+      getHeader("variable_effective_caller_id_name"),
+      getHeader("variable_caller_id_name"),
+    );
+
+    return { callUuid, fromRaw, toRaw, callerName };
+  }
+
   private async execAndWait(conn: Connection, app: string, arg = ""): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const onComplete = (evt: unknown) => {
@@ -91,7 +140,7 @@ export class EslCallHandlerService {
 
     try {
       // Wait for connection ready and get initial channel data
-      const connectData = await new Promise<{
+      const connectDataFromInfo = await new Promise<{
         callUuid: string;
         fromRaw: string | null;
         toRaw: string | null;
@@ -112,43 +161,46 @@ export class EslCallHandlerService {
             return headers && headers[name] != null ? String(headers[name]) : null;
           };
 
-          const uuid = 
-            getHeader("Channel-Call-UUID") || 
-            getHeader("Unique-ID") || 
-            getHeader("variable_uuid") ||
-            randomUUID();
-          
-          const fromRaw =
-            getHeader("Caller-Caller-ID-Number") ||
-            getHeader("variable_effective_caller_id_number") ||
-            getHeader("variable_caller_id_number") ||
-            getHeader("variable_sip_from_user") ||
-            null;
-
-          const toRaw =
-            getHeader("Caller-Destination-Number") ||
-            getHeader("variable_effective_callee_id_number") ||
-            getHeader("variable_destination_number") ||
-            getHeader("variable_sip_to_user") ||
-            getHeader("variable_sip_req_user") ||
-            null;
-
-          const callerName =
-            getHeader("Caller-Caller-ID-Name") ||
-            getHeader("variable_caller_id_name") ||
-            getHeader("variable_effective_caller_id_name") ||
-            null;
-
-          console.log(`Parsed call - UUID: ${uuid}, From: ${fromRaw || "unknown"}, To: ${toRaw || "unknown"}, Name: ${callerName || "N/A"}`);
-          resolve({ callUuid: uuid, fromRaw, toRaw, callerName });
+          const parsed = this.parseChannelHeaders(getHeader);
+          console.log(
+            `Parsed(call-info) - UUID: ${parsed.callUuid}, From: ${parsed.fromRaw || "unknown"}, To: ${parsed.toRaw || "unknown"}, Name: ${parsed.callerName || "N/A"}`,
+          );
+          resolve(parsed);
         });
       });
 
-      callUuid = connectData.callUuid;
-
-      // Subscribe to channel events
+      // Subscribe to channel events as early as possible
       conn.send("myevents");
       console.log("Subscribed to channel events with myevents");
+
+      // Prefer CHANNEL_DATA (has full variables) if it arrives quickly.
+      const connectData = await Promise.race([
+        new Promise<{
+          callUuid: string;
+          fromRaw: string | null;
+          toRaw: string | null;
+          callerName: string | null;
+        }>((resolve) => {
+          const onChannelData = (evt: unknown) => {
+            const eslEvent = evt as { getHeader?: (name: string) => string | undefined };
+            const getHeader = (name: string): string | null =>
+              eslEvent.getHeader ? (eslEvent.getHeader(name) ?? null) : null;
+
+            const parsed = this.parseChannelHeaders(getHeader);
+            console.log(
+              `Parsed(CHANNEL_DATA) - UUID: ${parsed.callUuid}, From: ${parsed.fromRaw || "unknown"}, To: ${parsed.toRaw || "unknown"}, Name: ${parsed.callerName || "N/A"}`,
+            );
+
+            conn.off("esl::event::CHANNEL_DATA::*", onChannelData);
+            resolve(parsed);
+          };
+
+          conn.on("esl::event::CHANNEL_DATA::*", onChannelData);
+        }),
+        new Promise<typeof connectDataFromInfo>((resolve) => setTimeout(() => resolve(connectDataFromInfo), 250)),
+      ]);
+
+      callUuid = connectData.callUuid;
 
       const fromE164 = connectData.fromRaw ? toE164BestEffort(connectData.fromRaw) : undefined;
       const toE164 = connectData.toRaw ? toE164BestEffort(connectData.toRaw) : undefined;
