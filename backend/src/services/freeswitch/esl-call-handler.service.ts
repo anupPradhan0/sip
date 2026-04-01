@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import { toE164BestEffort } from "../../utils/phone-normalize";
 import fs from "node:fs/promises";
+import { metrics } from "../observability/metrics.service";
 
 export interface EslCallHandlerOptions {
   port: number;
@@ -19,6 +20,24 @@ export class EslCallHandlerService {
   private host: string;
   private recordingsDir: string;
   private readonly activeProviderCallIds = new Set<string>();
+
+  private log(
+    ctx: { correlationId?: string; callId?: string; uuid?: string } | null,
+    level: "info" | "error",
+    message: string,
+    extra?: unknown,
+  ): void {
+    const prefix = ctx
+      ? `[corr=${ctx.correlationId ?? "-"} callId=${ctx.callId ?? "-"} uuid=${ctx.uuid ?? "-"}]`
+      : "";
+    if (level === "error") {
+      // eslint-disable-next-line no-console
+      console.error(prefix, message, extra ?? "");
+    } else {
+      // eslint-disable-next-line no-console
+      console.log(prefix, message, extra ?? "");
+    }
+  }
 
   private static readonly ANSWER_TIMEOUT_MS = 5000;
   private static readonly PLAYBACK_TIMEOUT_MS = 15000;
@@ -237,13 +256,13 @@ export class EslCallHandlerService {
     error: unknown;
   }): Promise<void> {
     const message = input.error instanceof Error ? input.error.message : String(input.error);
-    console.error(`Call failure at stage=${input.stage}:`, input.error);
+    this.log(null, "error", `Call failure at stage=${input.stage}: ${message}`, input.error);
 
     if (input.callId) {
       try {
         await this.callService.setStatus(input.callId, "failed", { failedAt: new Date() }, message);
       } catch (err) {
-        console.error("Failed to set call status=failed:", err);
+        this.log(null, "error", "Failed to set call status=failed", err);
       }
 
       try {
@@ -252,15 +271,17 @@ export class EslCallHandlerService {
           await this.callService.pushEvent(call, "failed", { stage: input.stage, error: message });
         }
       } catch (err) {
-        console.error("Failed to push failed event:", err);
+        this.log(null, "error", "Failed to push failed event", err);
       }
     }
+
+    metrics.incCounter("failedCalls");
 
     // Best-effort hangup with timeout
     try {
       await this.execAndWait(input.conn, "hangup", "", EslCallHandlerService.HANGUP_TIMEOUT_MS);
     } catch (err) {
-      console.error("Hangup attempt failed:", err);
+      this.log(null, "error", "Hangup attempt failed", err);
       try {
         input.conn.execute("hangup", "", () => {});
       } catch {
@@ -287,12 +308,13 @@ export class EslCallHandlerService {
       if (last && last.digit === d && now - last.at < 250) return;
       last = { digit: d, at: now };
 
-      console.log(`DTMF received: ${d}`);
+      this.log(null, "info", `DTMF received: ${d}`);
+      metrics.incCounter("dtmfCount");
       this.callService.callRepository.findById(callId).then((call) => {
         if (!call) return;
         return this.callService.pushEvent(call, "dtmf", { digit: d, at: new Date().toISOString() });
       }).catch((err) => {
-        console.error("Failed to persist DTMF event:", err);
+        this.log(null, "error", "Failed to persist DTMF event", err);
       });
     };
 
@@ -531,7 +553,7 @@ export class EslCallHandlerService {
     try {
       const from = input.fromE164 ?? input.fromRaw ?? "unknown";
       const to = input.toE164 ?? input.toRaw ?? "unknown";
-      console.log(`Executing call flow for ${input.callUuid} (${from} -> ${to})`);
+      this.log(null, "info", `Executing call flow for ${input.callUuid} (${from} -> ${to})`);
 
       const correlationId = randomUUID();
       const now = new Date();
@@ -558,6 +580,8 @@ export class EslCallHandlerService {
       );
 
       const callId = call._id.toString();
+      metrics.incActiveCalls();
+      const ctx = { correlationId: call.correlationId, callId, uuid: input.callUuid };
 
       if (created) {
         await this.callService.pushEvent(call, "received", {
@@ -572,13 +596,13 @@ export class EslCallHandlerService {
       }
 
       await this.execAndWait(conn, "answer", "", EslCallHandlerService.ANSWER_TIMEOUT_MS);
-      console.log("Call answered");
+      this.log(ctx, "info", "Call answered");
 
       await this.callService.setStatus(callId, "answered", { answeredAt: new Date() });
       await this.callService.pushEvent(call, "answered");
 
       await this.execAndWait(conn, "sleep", "500", 2000);
-      console.log("Sleep 500ms complete");
+      this.log(ctx, "info", "Sleep 500ms complete");
 
       await this.execAndWait(
         conn,
@@ -586,7 +610,7 @@ export class EslCallHandlerService {
         "tone_stream://%(1000,0,440)",
         EslCallHandlerService.PLAYBACK_TIMEOUT_MS,
       );
-      console.log("Playback complete");
+      this.log(ctx, "info", "Playback complete");
 
       await this.callService.setStatus(callId, "played", { playedAt: new Date() });
       await this.callService.pushEvent(call, "played", { message: "Tone played" });
@@ -619,7 +643,7 @@ export class EslCallHandlerService {
       }
 
       conn.execute("record_session", recordingPath, () => {});
-      console.log(`Recording started: ${recordingPath}`);
+      this.log(ctx, "info", `Recording started: ${recordingPath}`);
 
       // Enable DTMF events so we can stop early on "1"
       conn.send("event plain DTMF");
@@ -635,13 +659,13 @@ export class EslCallHandlerService {
       ]);
 
       if (outcome === "dtmf-1") {
-        console.log("DTMF 1 received: stopping recording early");
+        this.log(ctx, "info", "DTMF 1 received: stopping recording early");
       } else {
-        console.log("Recording duration complete");
+        this.log(ctx, "info", "Recording duration complete");
       }
 
       await this.execAndWait(conn, "stop_record_session", recordingPath, EslCallHandlerService.STOP_RECORD_TIMEOUT_MS);
-      console.log("Recording stopped");
+      this.log(ctx, "info", "Recording stopped");
 
       if (outcome === "dtmf-1") {
         // Confirmation tone (no external sound files required)
@@ -649,7 +673,8 @@ export class EslCallHandlerService {
       }
 
       detachDtmfLogger();
-      console.log(`Call flow setup completed for ${input.callUuid}`);
+      this.log(ctx, "info", `Call flow setup completed for ${input.callUuid}`);
+      metrics.decActiveCalls();
       return { callId, recordingPath };
     } catch (error) {
       // Handle failure: update DB + hangup; then rethrow so upstream logs also capture it.
@@ -663,7 +688,7 @@ export class EslCallHandlerService {
           error,
         });
       } catch (err) {
-        console.error("failAndHangup wrapper failed:", err);
+        this.log(null, "error", "failAndHangup wrapper failed", err);
       }
       throw error;
     }
@@ -675,7 +700,7 @@ export class EslCallHandlerService {
       
       const call = await this.callService.callRepository.findById(callId);
       if (!call) {
-        console.error(`Call ${callId} not found for recording completion`);
+        this.log({ callId, uuid: callUuid }, "error", "Call not found for recording completion");
         return;
       }
 
@@ -721,7 +746,12 @@ export class EslCallHandlerService {
           eventType: "recording_failed",
           payload: { providerRecordingId: callUuid, reason: "file_missing_or_empty" },
         });
-        console.error(`Recording file missing/empty after retries: ${filePath}`);
+        metrics.incCounter("recordingFailed");
+        this.log(
+          { correlationId: call.correlationId, callId: call._id.toString(), uuid: callUuid },
+          "error",
+          `Recording file missing/empty after retries: ${filePath}`,
+        );
         return;
       }
 
@@ -746,7 +776,11 @@ export class EslCallHandlerService {
             });
 
       if (!recording) {
-        console.error("Failed to upsert recording metadata");
+        this.log(
+          { correlationId: call.correlationId, callId: call._id.toString(), uuid: callUuid },
+          "error",
+          "Failed to upsert recording metadata",
+        );
         return;
       }
 
@@ -760,9 +794,13 @@ export class EslCallHandlerService {
         });
       }
 
-      console.log("Recording metadata saved to MongoDB");
+      this.log(
+        { correlationId: call.correlationId, callId: call._id.toString(), uuid: callUuid },
+        "info",
+        "Recording metadata saved to MongoDB",
+      );
     } catch (error) {
-      console.error("Error handling recording completion:", error);
+      this.log({ callId, uuid: callUuid }, "error", "Error handling recording completion", error);
     }
   }
 

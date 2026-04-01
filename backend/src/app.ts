@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { apiRouter } from "./routes";
 import { errorHandler, notFoundHandler } from "./middlewares/error.middleware";
+import { randomUUID } from "node:crypto";
 
 export const app = express();
 
@@ -15,6 +16,15 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Correlation id for HTTP requests (best-effort).
+app.use((req, res, next) => {
+  const incoming = req.header("X-Correlation-Id")?.trim();
+  const correlationId = incoming && incoming.length > 0 ? incoming : randomUUID();
+  res.setHeader("X-Correlation-Id", correlationId);
+  (req as any).correlationId = correlationId;
+  next();
+});
 
 function getPublicBaseUrl(req: express.Request): string {
   const explicit = process.env.PUBLIC_BASE_URL?.trim();
