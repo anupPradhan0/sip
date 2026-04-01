@@ -17,6 +17,7 @@ export class EslCallHandlerService {
   private port: number;
   private host: string;
   private recordingsDir: string;
+  private readonly activeProviderCallIds = new Set<string>();
 
   private static readonly ANSWER_TIMEOUT_MS = 5000;
   private static readonly PLAYBACK_TIMEOUT_MS = 15000;
@@ -440,6 +441,10 @@ export class EslCallHandlerService {
         callUuid = uuidFromVar;
       }
 
+      if (callUuid) {
+        this.activeProviderCallIds.add(callUuid);
+      }
+
       if (fromRaw || toRaw || callerName) {
         console.log(
           `Parsed(getvar) - UUID: ${callUuid}, From: ${fromRaw || "unknown"}, To: ${toRaw || "unknown"}, Name: ${callerName || "N/A"}`,
@@ -482,6 +487,9 @@ export class EslCallHandlerService {
 
       conn.on("esl::end", () => {
         console.log("ESL connection ended");
+        if (callUuid) {
+          this.activeProviderCallIds.delete(callUuid);
+        }
       });
 
       // Execute call flow
@@ -498,7 +506,14 @@ export class EslCallHandlerService {
       recordingPath = result.recordingPath;
     } catch (error) {
       console.error("Error in ESL connection handler:", error);
+      if (callUuid) {
+        this.activeProviderCallIds.delete(callUuid);
+      }
     }
+  }
+
+  getActiveProviderCallIds(): ReadonlySet<string> {
+    return this.activeProviderCallIds;
   }
 
   private async executeCallFlow(
