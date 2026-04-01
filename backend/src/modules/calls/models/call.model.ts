@@ -75,4 +75,7 @@ const callSchema = new Schema<CallDocument>(
   { timestamps: true },
 );
 
+// Dedupe at DB-level for provider-originated calls (e.g., freeswitch uuid)
+callSchema.index({ provider: 1, providerCallId: 1 }, { unique: true, sparse: true });
+
 export const CallModel = model<CallDocument>("Call", callSchema);

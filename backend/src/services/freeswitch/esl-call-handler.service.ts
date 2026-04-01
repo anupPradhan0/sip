@@ -8,7 +8,7 @@ export interface EslCallHandlerOptions {
   port: number;
   host?: string;
   recordingsDir?: string;
-  mediaServer: null;
+  mediaServer?: null;
 }
 
 export class EslCallHandlerService {
@@ -18,11 +18,17 @@ export class EslCallHandlerService {
   private host: string;
   private recordingsDir: string;
 
-  private async sendRecvAsync(conn: Connection, command: string): Promise<{ body: string; replyText?: string }> {
+  private async sendRecvAsync(
+    conn: Connection,
+    command: string,
+  ): Promise<{ body: string; replyText?: string }> {
     return await new Promise<{ body: string; replyText?: string }>((resolve, reject) => {
-      conn.sendRecv(command, (evt: any) => {
-        const body = typeof evt?.getBody === "function" ? String(evt.getBody() ?? "") : "";
-        const replyText = typeof evt?.getHeader === "function" ? (evt.getHeader("Reply-Text") as string | undefined) : undefined;
+      conn.sendRecv(command, (evt: unknown) => {
+        const e = evt as { getBody?: () => unknown; getHeader?: (name: string) => unknown } | undefined;
+        const body = typeof e?.getBody === "function" ? String(e.getBody() ?? "") : "";
+        const replyTextRaw =
+          typeof e?.getHeader === "function" ? e.getHeader("Reply-Text") : undefined;
+        const replyText = typeof replyTextRaw === "string" ? replyTextRaw : undefined;
         const errText = (replyText && replyText.startsWith("-ERR")) ? replyText : (body && body.startsWith("-ERR") ? body : "");
         if (errText) return reject(new Error(errText));
         resolve({ body, replyText });
@@ -109,12 +115,9 @@ export class EslCallHandlerService {
         : [];
     if (!arr.length) return out;
     for (const item of arr) {
-      const str =
-        typeof item === "string"
-          ? item
-          : item && typeof item === "object" && "raw" in (item as any) && typeof (item as any).raw === "string"
-            ? (item as any).raw
-            : null;
+      const obj = (item && typeof item === "object") ? (item as Record<string, unknown>) : null;
+      const raw = obj ? obj["raw"] : undefined;
+      const str = typeof item === "string" ? item : typeof raw === "string" ? raw : null;
       if (!str) continue;
       const idx = str.indexOf(":");
       if (idx <= 0) continue;
@@ -146,8 +149,9 @@ export class EslCallHandlerService {
 
       conn.on("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
 
-      conn.execute(app, arg, (reply: any) => {
-        const body = typeof reply?.getBody === "function" ? reply.getBody() : "";
+      conn.execute(app, arg, (reply: unknown) => {
+        const r = reply as { getBody?: () => unknown } | undefined;
+        const body = typeof r?.getBody === "function" ? r.getBody() : "";
         if (typeof body === "string" && body.startsWith("-ERR")) {
           conn.off("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
           reject(new Error(body));
@@ -240,7 +244,7 @@ export class EslCallHandlerService {
           
           // In outbound mode, FreeSWITCH sends channel data immediately
           // Access it via getInfo() which returns the initial headers
-          const info = (conn as any).getInfo();
+          const info = (conn as unknown as { getInfo?: () => unknown }).getInfo?.();
           // modesl getInfo() varies by version; headers may be an array of header lines.
           const rawHeaders =
             info && typeof info === "object" && "headers" in info ? (info.headers as unknown) : (info as unknown);
@@ -369,7 +373,7 @@ export class EslCallHandlerService {
 
       // Execute call flow
       const result = await this.executeCallFlow(conn, {
-        callUuid: connectData.callUuid,
+        callUuid: callUuid ?? connectData.callUuid,
         fromRaw,
         toRaw,
         fromE164: finalFromE164,
@@ -403,34 +407,40 @@ export class EslCallHandlerService {
       const correlationId = randomUUID();
       const now = new Date();
 
-      const call = await this.callService.callRepository.create({
-        direction: "inbound",
-        provider: "freeswitch",
-        from,
-        to,
-        fromRaw: input.fromRaw ?? undefined,
-        toRaw: input.toRaw ?? undefined,
-        fromE164: input.fromE164,
-        toE164: input.toE164,
-        callerName: input.callerName,
-        status: "received",
-        correlationId,
-        providerCallId: input.callUuid,
-        recordingEnabled: true,
-        timestamps: { receivedAt: now },
-      });
+      const { call, created } = await this.callService.callRepository.findOrCreateByProviderCallId(
+        "freeswitch",
+        input.callUuid,
+        {
+          direction: "inbound",
+          provider: "freeswitch",
+          from,
+          to,
+          fromRaw: input.fromRaw ?? undefined,
+          toRaw: input.toRaw ?? undefined,
+          fromE164: input.fromE164,
+          toE164: input.toE164,
+          callerName: input.callerName,
+          status: "received",
+          correlationId,
+          providerCallId: input.callUuid,
+          recordingEnabled: true,
+          timestamps: { receivedAt: now },
+        },
+      );
 
       const callId = call._id.toString();
 
-      await this.callService.pushEvent(call, "received", {
-        from,
-        to,
-        fromRaw: input.fromRaw ?? undefined,
-        toRaw: input.toRaw ?? undefined,
-        fromE164: input.fromE164,
-        toE164: input.toE164,
-        callUuid: input.callUuid,
-      });
+      if (created) {
+        await this.callService.pushEvent(call, "received", {
+          from,
+          to,
+          fromRaw: input.fromRaw ?? undefined,
+          toRaw: input.toRaw ?? undefined,
+          fromE164: input.fromE164,
+          toE164: input.toE164,
+          callUuid: input.callUuid,
+        });
+      }
 
       await this.execAndWait(conn, "answer", "");
       console.log("Call answered");
@@ -500,22 +510,42 @@ export class EslCallHandlerService {
         return;
       }
 
-      const recording = await this.callService.recordingRepository.create({
-        callId: call._id,
-        provider: "freeswitch",
-        providerRecordingId: callUuid,
-        status: "completed",
+      const existing = await this.callService.recordingRepository.findByProviderRecordingId(callUuid);
+
+      const patch = {
+        status: "completed" as const,
         durationSec: 20,
         filePath,
         retrievalUrl: `/api/recordings/local/${callUuid}`,
-      });
+      };
 
-      await this.callService.callEventRepository.create({
-        callId: call._id,
-        correlationId: call.correlationId,
-        eventType: "recording_completed",
-        payload: { providerRecordingId: callUuid, recordingId: recording._id.toString() },
-      });
+      const recording =
+        existing
+          ? await this.callService.recordingRepository.updateById(existing._id.toString(), patch)
+          : await this.callService.recordingRepository.create({
+              callId: call._id,
+              provider: "freeswitch",
+              providerRecordingId: callUuid,
+              status: "completed",
+              durationSec: 20,
+              filePath,
+              retrievalUrl: `/api/recordings/local/${callUuid}`,
+            });
+
+      if (!recording) {
+        console.error("Failed to upsert recording metadata");
+        return;
+      }
+
+      // Only emit completion event once (avoid duplicates on retries).
+      if (!existing || existing.status !== "completed") {
+        await this.callService.callEventRepository.create({
+          callId: call._id,
+          correlationId: call.correlationId,
+          eventType: "recording_completed",
+          payload: { providerRecordingId: callUuid, recordingId: recording._id.toString() },
+        });
+      }
 
       console.log("Recording metadata saved to MongoDB");
     } catch (error) {

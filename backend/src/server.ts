@@ -54,7 +54,7 @@ async function bootstrap(): Promise<void> {
     port: eslOutboundPort,
     host: "0.0.0.0",
     recordingsDir,
-    mediaServer: null as any, // Not needed for ESL outbound mode
+    mediaServer: null, // Not needed for ESL outbound mode
   });
 
   await eslServer.listen();

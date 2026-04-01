@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { CallDocument, CallModel, CallStatus } from "../models/call.model";
+import { CallDocument, CallModel, CallProvider, CallStatus } from "../models/call.model";
 
 export class CallRepository {
   async create(payload: Omit<CallDocument, "_id" | "createdAt" | "updatedAt">): Promise<CallDocument> {
@@ -19,6 +19,28 @@ export class CallRepository {
 
   async findByProviderCallId(providerCallId: string): Promise<CallDocument | null> {
     return CallModel.findOne({ providerCallId });
+  }
+
+  async findOrCreateByProviderCallId(
+    provider: CallProvider,
+    providerCallId: string,
+    payload: Omit<CallDocument, "_id" | "createdAt" | "updatedAt">,
+  ): Promise<{ call: CallDocument; created: boolean }> {
+    const existing = await CallModel.findOne({ provider, providerCallId });
+    if (existing) return { call: existing, created: false };
+
+    try {
+      const created = await CallModel.create({ ...payload, provider, providerCallId });
+      return { call: created, created: true };
+    } catch (err: unknown) {
+      // Handle race: two workers try to create same provider+providerCallId concurrently.
+      const e = err as { code?: number } | undefined;
+      if (e?.code === 11000) {
+        const after = await CallModel.findOne({ provider, providerCallId });
+        if (after) return { call: after, created: false };
+      }
+      throw err;
+    }
   }
 
   async updateStatus(
