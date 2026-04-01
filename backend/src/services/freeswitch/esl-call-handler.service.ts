@@ -18,6 +18,25 @@ export class EslCallHandlerService {
   private host: string;
   private recordingsDir: string;
 
+  private static readonly ANSWER_TIMEOUT_MS = 5000;
+  private static readonly PLAYBACK_TIMEOUT_MS = 15000;
+  private static readonly SLEEP_TIMEOUT_MS = 25000;
+  private static readonly STOP_RECORD_TIMEOUT_MS = 5000;
+  private static readonly HANGUP_TIMEOUT_MS = 3000;
+  private static readonly GETVAR_TIMEOUT_MS = 2000;
+
+  private async withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   private async sendRecvAsync(
     conn: Connection,
     command: string,
@@ -38,7 +57,11 @@ export class EslCallHandlerService {
 
   private async getVar(conn: Connection, name: string): Promise<string | null> {
     try {
-      const { body, replyText } = await this.sendRecvAsync(conn, `getvar ${name}`);
+      const { body, replyText } = await this.withTimeout(
+        this.sendRecvAsync(conn, `getvar ${name}`),
+        EslCallHandlerService.GETVAR_TIMEOUT_MS,
+        `getvar ${name}`,
+      );
       const raw = (body || replyText || "").trim();
 
       // FreeSWITCH commonly returns: "+OK <value>" in Reply-Text
@@ -129,8 +152,10 @@ export class EslCallHandlerService {
     return out;
   }
 
-  private async execAndWait(conn: Connection, app: string, arg = ""): Promise<void> {
+  private async execAndWait(conn: Connection, app: string, arg = "", timeoutMs?: number): Promise<void> {
+    const ms = timeoutMs ?? EslCallHandlerService.PLAYBACK_TIMEOUT_MS;
     await new Promise<void>((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
       const onComplete = (evt: unknown) => {
         try {
           const eslEvent = evt as { getHeader?: (name: string) => string | undefined };
@@ -140,20 +165,28 @@ export class EslCallHandlerService {
           if (application !== app) return;
           if ((arg ?? "") && (applicationData ?? "") !== (arg ?? "")) return;
           conn.off("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
+          if (timer) clearTimeout(timer);
           resolve();
         } catch (err) {
           conn.off("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
+          if (timer) clearTimeout(timer);
           reject(err);
         }
       };
 
       conn.on("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
 
+      timer = setTimeout(() => {
+        conn.off("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
+        reject(new Error(`Timeout after ${ms}ms: exec ${app} ${arg}`.trim()));
+      }, ms);
+
       conn.execute(app, arg, (reply: unknown) => {
         const r = reply as { getBody?: () => unknown } | undefined;
         const body = typeof r?.getBody === "function" ? r.getBody() : "";
         if (typeof body === "string" && body.startsWith("-ERR")) {
           conn.off("esl::event::CHANNEL_EXECUTE_COMPLETE::*", onComplete);
+          if (timer) clearTimeout(timer);
           reject(new Error(body));
         }
       });
@@ -188,6 +221,45 @@ export class EslCallHandlerService {
 
       const timer = setTimeout(() => finish("timeout"), timeoutMs);
     });
+  }
+
+  private async failAndHangup(input: {
+    conn: Connection;
+    callId?: string;
+    stage: string;
+    error: unknown;
+  }): Promise<void> {
+    const message = input.error instanceof Error ? input.error.message : String(input.error);
+    console.error(`Call failure at stage=${input.stage}:`, input.error);
+
+    if (input.callId) {
+      try {
+        await this.callService.setStatus(input.callId, "failed", { failedAt: new Date() }, message);
+      } catch (err) {
+        console.error("Failed to set call status=failed:", err);
+      }
+
+      try {
+        const call = await this.callService.callRepository.findById(input.callId);
+        if (call) {
+          await this.callService.pushEvent(call, "failed", { stage: input.stage, error: message });
+        }
+      } catch (err) {
+        console.error("Failed to push failed event:", err);
+      }
+    }
+
+    // Best-effort hangup with timeout
+    try {
+      await this.execAndWait(input.conn, "hangup", "", EslCallHandlerService.HANGUP_TIMEOUT_MS);
+    } catch (err) {
+      console.error("Hangup attempt failed:", err);
+      try {
+        input.conn.execute("hangup", "", () => {});
+      } catch {
+        // ignore
+      }
+    }
   }
 
   constructor(options: EslCallHandlerOptions) {
@@ -442,16 +514,21 @@ export class EslCallHandlerService {
         });
       }
 
-      await this.execAndWait(conn, "answer", "");
+      await this.execAndWait(conn, "answer", "", EslCallHandlerService.ANSWER_TIMEOUT_MS);
       console.log("Call answered");
 
       await this.callService.setStatus(callId, "answered", { answeredAt: new Date() });
       await this.callService.pushEvent(call, "answered");
 
-      await this.execAndWait(conn, "sleep", "500");
+      await this.execAndWait(conn, "sleep", "500", 2000);
       console.log("Sleep 500ms complete");
 
-      await this.execAndWait(conn, "playback", "tone_stream://%(1000,0,440)");
+      await this.execAndWait(
+        conn,
+        "playback",
+        "tone_stream://%(1000,0,440)",
+        EslCallHandlerService.PLAYBACK_TIMEOUT_MS,
+      );
       console.log("Playback complete");
 
       await this.callService.setStatus(callId, "played", { playedAt: new Date() });
@@ -472,7 +549,7 @@ export class EslCallHandlerService {
       const outcome = await Promise.race([
         this.waitForDtmf1(conn, 20000),
         (async () => {
-          await this.execAndWait(conn, "sleep", "20000");
+          await this.execAndWait(conn, "sleep", "20000", EslCallHandlerService.SLEEP_TIMEOUT_MS);
           return "timeout" as const;
         })(),
       ]);
@@ -484,18 +561,30 @@ export class EslCallHandlerService {
         console.log("Recording duration complete");
       }
 
-      await this.execAndWait(conn, "stop_record_session", recordingPath);
+      await this.execAndWait(conn, "stop_record_session", recordingPath, EslCallHandlerService.STOP_RECORD_TIMEOUT_MS);
       console.log("Recording stopped");
 
       if (outcome === "dtmf-1") {
         // Confirmation tone (no external sound files required)
-        await this.execAndWait(conn, "playback", "tone_stream://%(200,0,880)");
+        await this.execAndWait(conn, "playback", "tone_stream://%(200,0,880)", 5000);
       }
 
       console.log(`Call flow setup completed for ${input.callUuid}`);
       return { callId, recordingPath };
     } catch (error) {
-      console.error("Error in call flow execution:", error);
+      // Handle failure: update DB + hangup; then rethrow so upstream logs also capture it.
+      // Note: at this point we should always have a callId because we create/find it early.
+      try {
+        const existing = await this.callService.callRepository.findByProviderCallId(input.callUuid);
+        await this.failAndHangup({
+          conn,
+          callId: existing?._id?.toString(),
+          stage: "executeCallFlow",
+          error,
+        });
+      } catch (err) {
+        console.error("failAndHangup wrapper failed:", err);
+      }
       throw error;
     }
   }
