@@ -66,4 +66,15 @@ export class CallRepository {
     }
     await CallModel.findByIdAndUpdate(id, { providerCallId });
   }
+
+  async updateById(id: string, patch: Partial<CallDocument>): Promise<CallDocument | null> {
+    if (!Types.ObjectId.isValid(id)) {
+      return null;
+    }
+    // Avoid allowing callers to change identity fields unintentionally.
+    // (We still allow setting providerCallId/upstreamCallId explicitly via patch.)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { _id, createdAt, updatedAt, ...safePatch } = patch as Record<string, unknown>;
+    return CallModel.findByIdAndUpdate(id, safePatch, { new: true, runValidators: true });
+  }
 }

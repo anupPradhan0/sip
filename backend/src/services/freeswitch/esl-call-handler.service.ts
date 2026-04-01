@@ -173,6 +173,16 @@ export class EslCallHandlerService {
     return out;
   }
 
+  private extractKullooCallId(headersObj: Record<string, unknown>): string | null {
+    const candidates = Object.entries(headersObj)
+      .filter(([k]) => k.toLowerCase().includes("kulloocallid"))
+      .map(([, v]) => String(v ?? "").trim())
+      .filter(Boolean);
+    const val = candidates[0] ?? null;
+    if (!val) return null;
+    return /^[a-fA-F0-9]{24}$/.test(val) ? val : null;
+  }
+
   private async execAndWait(conn: Connection, app: string, arg = "", timeoutMs?: number): Promise<void> {
     const ms = timeoutMs ?? EslCallHandlerService.PLAYBACK_TIMEOUT_MS;
     await new Promise<void>((resolve, reject) => {
@@ -375,6 +385,7 @@ export class EslCallHandlerService {
         fromRaw: string | null;
         toRaw: string | null;
         callerName: string | null;
+        kullooCallId: string | null;
       }>((resolve) => {
         conn.on("esl::ready", () => {
           console.log("ESL connection ready");
@@ -398,10 +409,11 @@ export class EslCallHandlerService {
           };
 
           const parsed = this.parseChannelHeaders(getHeader);
+          const kullooCallId = this.extractKullooCallId(headersObj);
           console.log(
             `Parsed(call-info) - UUID: ${parsed.callUuid}, From: ${parsed.fromRaw || "unknown"}, To: ${parsed.toRaw || "unknown"}, Name: ${parsed.callerName || "N/A"}`,
           );
-          resolve(parsed);
+          resolve({ ...parsed, kullooCallId });
         });
       });
 
@@ -416,6 +428,7 @@ export class EslCallHandlerService {
           fromRaw: string | null;
           toRaw: string | null;
           callerName: string | null;
+          kullooCallId: string | null;
         }>((resolve) => {
           const onChannelData = (evt: unknown) => {
             const eslEvent = evt as { getHeader?: (name: string) => string | undefined };
@@ -423,12 +436,15 @@ export class EslCallHandlerService {
               eslEvent.getHeader ? (eslEvent.getHeader(name) ?? null) : null;
 
             const parsed = this.parseChannelHeaders(getHeader);
+            // If Plivo passed a SIP header, FreeSWITCH usually exposes it as `variable_sip_h_X-PH-KullooCallId`.
+            const headersObj = this.parseHeaderLines((evt as any)?.headers ?? evt);
+            const kullooCallId = this.extractKullooCallId(headersObj);
             console.log(
               `Parsed(CHANNEL_DATA) - UUID: ${parsed.callUuid}, From: ${parsed.fromRaw || "unknown"}, To: ${parsed.toRaw || "unknown"}, Name: ${parsed.callerName || "N/A"}`,
             );
 
             conn.off("esl::event::CHANNEL_DATA::*", onChannelData);
-            resolve(parsed);
+            resolve({ ...parsed, kullooCallId });
           };
 
           conn.on("esl::event::CHANNEL_DATA::*", onChannelData);
@@ -444,6 +460,7 @@ export class EslCallHandlerService {
       let fromRaw = connectData.fromRaw;
       let toRaw = connectData.toRaw;
       let callerName = connectData.callerName;
+      let kullooCallId = connectData.kullooCallId;
 
       if (!fromRaw) fromRaw = await this.getVar(conn, "effective_caller_id_number");
       if (!fromRaw) fromRaw = await this.getVar(conn, "caller_id_number");
@@ -456,6 +473,17 @@ export class EslCallHandlerService {
 
       if (!callerName) callerName = await this.getVar(conn, "effective_caller_id_name");
       if (!callerName) callerName = await this.getVar(conn, "caller_id_name");
+
+      // Correlation: try to fetch our custom Plivo SIP header as a channel var.
+      if (!kullooCallId) {
+        kullooCallId =
+          (await this.getVar(conn, "sip_h_X-PH-KullooCallId")) ??
+          (await this.getVar(conn, "sip_h_X_PH_KullooCallId")) ??
+          (await this.getVar(conn, "variable_sip_h_X-PH-KullooCallId"));
+        if (kullooCallId && !/^[a-fA-F0-9]{24}$/.test(kullooCallId)) {
+          kullooCallId = null;
+        }
+      }
 
       // If our parsed UUID was random/incorrect, fetch the real per-channel UUID.
       const uuidFromVar = await this.getVar(conn, "uuid");
@@ -523,6 +551,7 @@ export class EslCallHandlerService {
         fromE164: finalFromE164,
         toE164: finalToE164,
         callerName: callerName ?? undefined,
+        kullooCallId,
       });
       
       callId = result.callId;
@@ -548,6 +577,7 @@ export class EslCallHandlerService {
       fromE164?: string;
       toE164?: string;
       callerName?: string;
+      kullooCallId?: string | null;
     },
   ): Promise<{ callId: string; recordingPath: string }> {
     try {
@@ -555,29 +585,55 @@ export class EslCallHandlerService {
       const to = input.toE164 ?? input.toRaw ?? "unknown";
       this.log(null, "info", `Executing call flow for ${input.callUuid} (${from} -> ${to})`);
 
-      const correlationId = randomUUID();
       const now = new Date();
+      const correlationId = randomUUID();
 
-      const { call, created } = await this.callService.callRepository.findOrCreateByProviderCallId(
-        "freeswitch",
-        input.callUuid,
-        {
-          direction: "inbound",
-          provider: "freeswitch",
-          from,
-          to,
-          fromRaw: input.fromRaw ?? undefined,
-          toRaw: input.toRaw ?? undefined,
-          fromE164: input.fromE164,
-          toE164: input.toE164,
-          callerName: input.callerName,
-          status: "received",
-          correlationId,
-          providerCallId: input.callUuid,
-          recordingEnabled: true,
-          timestamps: { receivedAt: now },
-        },
-      );
+      // If this ESL session corresponds to an API-initiated outbound call, attach to that call record.
+      let call: any = null;
+      let created = false;
+      const kullooCallId = input.kullooCallId && typeof input.kullooCallId === "string" ? input.kullooCallId : null;
+      if (kullooCallId && /^[a-fA-F0-9]{24}$/.test(kullooCallId)) {
+        const existing = await this.callService.callRepository.findById(kullooCallId);
+        if (existing) {
+          call = await this.callService.callRepository.updateById(existing._id.toString(), {
+            provider: "freeswitch",
+            providerCallId: input.callUuid,
+            direction: "outbound",
+            from,
+            to,
+            fromRaw: input.fromRaw ?? undefined,
+            toRaw: input.toRaw ?? undefined,
+            fromE164: input.fromE164,
+            toE164: input.toE164,
+            callerName: input.callerName,
+          });
+        }
+      }
+
+      if (!call) {
+        const result = await this.callService.callRepository.findOrCreateByProviderCallId(
+          "freeswitch",
+          input.callUuid,
+          {
+            direction: "inbound",
+            provider: "freeswitch",
+            from,
+            to,
+            fromRaw: input.fromRaw ?? undefined,
+            toRaw: input.toRaw ?? undefined,
+            fromE164: input.fromE164,
+            toE164: input.toE164,
+            callerName: input.callerName,
+            status: "received",
+            correlationId,
+            providerCallId: input.callUuid,
+            recordingEnabled: true,
+            timestamps: { receivedAt: now },
+          },
+        );
+        call = result.call;
+        created = result.created;
+      }
 
       const callId = call._id.toString();
       metrics.incActiveCalls();
@@ -673,6 +729,8 @@ export class EslCallHandlerService {
       }
 
       detachDtmfLogger();
+      // Hard hangup to enforce max duration; this matches the desired outbound behavior.
+      await this.execAndWait(conn, "hangup", "", EslCallHandlerService.HANGUP_TIMEOUT_MS);
       this.log(ctx, "info", `Call flow setup completed for ${input.callUuid}`);
       metrics.decActiveCalls();
       return { callId, recordingPath };

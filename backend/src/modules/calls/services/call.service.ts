@@ -86,7 +86,9 @@ export class CallService {
     const now = new Date();
     const call = await this.callRepository.create({
       direction: "outbound",
-      provider: payload.provider,
+      // Outbound PSTN via Plivo uses FreeSWITCH as the media/control plane.
+      provider: payload.provider === "plivo" ? "freeswitch" : payload.provider,
+      upstreamProvider: payload.provider === "plivo" ? "plivo" : undefined,
       from: payload.from,
       to: payload.to,
       status: "initiated",
@@ -104,13 +106,24 @@ export class CallService {
         to: payload.to,
         recordingEnabled: payload.recordingEnabled,
         message: "Hello from kulloo hello-call.",
+        kullooCallId: call._id.toString(),
       });
 
-      await this.callRepository.setProviderCallId(call._id.toString(), result.providerCallId);
+      if (payload.provider === "plivo") {
+        await this.callRepository.updateById(call._id.toString(), {
+          upstreamProvider: "plivo",
+          upstreamCallId: result.providerCallId,
+        });
+      } else {
+        await this.callRepository.setProviderCallId(call._id.toString(), result.providerCallId);
+      }
       await this.setStatus(call._id.toString(), this.mapConnectedStatus(payload.provider), {
         connectedAt: result.connectedAt,
       });
-      await this.pushEvent(call, "connected", { providerCallId: result.providerCallId });
+      await this.pushEvent(call, "connected", {
+        providerCallId: payload.provider === "plivo" ? undefined : result.providerCallId,
+        upstreamCallId: payload.provider === "plivo" ? result.providerCallId : undefined,
+      });
 
       await this.setStatus(call._id.toString(), "played", { playedAt: result.playedAt });
       await this.pushEvent(call, "played", { message: "Hello from kulloo hello-call." });

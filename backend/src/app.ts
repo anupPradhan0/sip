@@ -43,6 +43,13 @@ function sendPlivoAnswerXml(req: express.Request, res: express.Response): void {
   res.setHeader("Expires", "0");
 
   const callUuid = (req.method === "GET" ? req.query.CallUUID : req.body?.CallUUID) as string | undefined;
+  const kullooCallId =
+    ((req.method === "GET" ? req.query.kullooCallId : req.body?.kullooCallId) as string | undefined) ??
+    // When Plivo passes custom headers, they may appear as query params like `X-PH-<Name>=<Value>`.
+    // Our TelephonyAdapter uses `sipHeaders: KullooCallId=<mongoObjectId>` which becomes `X-PH-KullooCallId`.
+    ((req.method === "GET" ? (req.query["X-PH-KullooCallId"] as unknown) : (req.body?.["X-PH-KullooCallId"] as unknown)) as
+      | string
+      | undefined);
   const baseUrl = getPublicBaseUrl(req);
   const freeswitchSipUri = process.env.FREESWITCH_SIP_URI?.trim();
 
@@ -58,10 +65,14 @@ function sendPlivoAnswerXml(req: express.Request, res: express.Response): void {
   }
 
   // Route the call to our media plane (FreeSWITCH). Recording happens there (Kulloo-owned).
+  const sipHeadersAttr =
+    typeof kullooCallId === "string" && /^[a-fA-F0-9]{24}$/.test(kullooCallId.trim())
+      ? ` sipHeaders="KullooCallId=${kullooCallId.trim()}"`
+      : "";
   res.type("application/xml").status(200).send(
     `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial>
+  <Dial${sipHeadersAttr}>
     <User>${freeswitchSipUri}</User>
   </Dial>
 </Response>`,

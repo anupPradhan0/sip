@@ -19,6 +19,7 @@ export interface OutboundExecutionInput {
   to: string;
   recordingEnabled: boolean;
   message: string;
+  kullooCallId?: string;
 }
 
 export class TelephonyAdapter {
@@ -101,12 +102,19 @@ export class TelephonyAdapter {
     const plivo = await import("plivo");
     const client = new plivo.Client(authId, authToken);
 
+    const kullooCallId = input.kullooCallId ? String(input.kullooCallId).trim() : "";
+    // Plivo requires alphanumeric header name+value. Mongo ObjectId hex is safe.
+    const sipHeaders = kullooCallId && /^[a-fA-F0-9]{24}$/.test(kullooCallId)
+      ? `KullooCallId=${kullooCallId}`
+      : undefined;
+
     const call = await client.calls.create(
       input.from,
       input.to,
       answerUrl,
       {
         answerMethod: "GET",
+        ...(sipHeaders ? { sipHeaders } : {}),
         ...(hangupUrl ? { hangupUrl, hangupMethod: "POST" } : {}),
       },
     );

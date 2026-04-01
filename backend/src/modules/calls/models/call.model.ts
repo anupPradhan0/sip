@@ -17,6 +17,8 @@ export interface CallDocument {
   _id: Types.ObjectId;
   direction: CallDirection;
   provider: CallProvider;
+  upstreamProvider?: CallProvider;
+  upstreamCallId?: string;
   from: string;
   to: string;
   fromRaw?: string;
@@ -48,6 +50,8 @@ const callSchema = new Schema<CallDocument>(
   {
     direction: { type: String, enum: ["inbound", "outbound"], required: true },
     provider: { type: String, enum: ["sip-local", "twilio", "plivo", "freeswitch"], required: true },
+    upstreamProvider: { type: String, enum: ["sip-local", "twilio", "plivo", "freeswitch"], required: false },
+    upstreamCallId: { type: String, trim: true },
     from: { type: String, required: true, trim: true },
     to: { type: String, required: true, trim: true },
     fromRaw: { type: String, trim: true },
@@ -77,5 +81,7 @@ const callSchema = new Schema<CallDocument>(
 
 // Dedupe at DB-level for provider-originated calls (e.g., freeswitch uuid)
 callSchema.index({ provider: 1, providerCallId: 1 }, { unique: true, sparse: true });
+// Dedupe upstream provider call IDs (e.g., Plivo request_uuid) when present.
+callSchema.index({ upstreamProvider: 1, upstreamCallId: 1 }, { unique: true, sparse: true });
 
 export const CallModel = model<CallDocument>("Call", callSchema);
