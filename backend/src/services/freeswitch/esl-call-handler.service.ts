@@ -193,7 +193,11 @@ export class EslCallHandlerService {
     });
   }
 
-  private waitForDtmf1(conn: Connection, timeoutMs: number): Promise<"dtmf-1" | "timeout"> {
+  private waitForDtmf1(
+    conn: Connection,
+    timeoutMs: number,
+    onDigit?: (digit: string) => void,
+  ): Promise<"dtmf-1" | "timeout"> {
     return new Promise((resolve) => {
       let done = false;
       const finish = (result: "dtmf-1" | "timeout") => {
@@ -213,6 +217,7 @@ export class EslCallHandlerService {
           (eslEvent.getHeader ? eslEvent.getHeader("Key") : undefined);
         if (!digit) return;
         const d = String(digit).trim();
+        onDigit?.(d);
         if (d === "1") finish("dtmf-1");
       };
 
@@ -260,6 +265,42 @@ export class EslCallHandlerService {
         // ignore
       }
     }
+  }
+
+  private attachDtmfLogger(conn: Connection, callId: string): () => void {
+    // Both DTMF and CHANNEL_DTMF may fire; dedupe very close duplicates.
+    let last: { digit: string; at: number } | null = null;
+
+    const handler = (evt: unknown) => {
+      const eslEvent = evt as { getHeader?: (name: string) => string | undefined };
+      const digit =
+        (eslEvent.getHeader ? eslEvent.getHeader("DTMF-Digit") : undefined) ??
+        (eslEvent.getHeader ? eslEvent.getHeader("digit") : undefined) ??
+        (eslEvent.getHeader ? eslEvent.getHeader("Key") : undefined);
+      if (!digit) return;
+      const d = String(digit).trim();
+      if (!d) return;
+
+      const now = Date.now();
+      if (last && last.digit === d && now - last.at < 250) return;
+      last = { digit: d, at: now };
+
+      console.log(`DTMF received: ${d}`);
+      this.callService.callRepository.findById(callId).then((call) => {
+        if (!call) return;
+        return this.callService.pushEvent(call, "dtmf", { digit: d, at: new Date().toISOString() });
+      }).catch((err) => {
+        console.error("Failed to persist DTMF event:", err);
+      });
+    };
+
+    conn.on("esl::event::DTMF::*", handler);
+    conn.on("esl::event::CHANNEL_DTMF::*", handler);
+
+    return () => {
+      conn.off("esl::event::DTMF::*", handler);
+      conn.off("esl::event::CHANNEL_DTMF::*", handler);
+    };
   }
 
   constructor(options: EslCallHandlerOptions) {
@@ -545,6 +586,7 @@ export class EslCallHandlerService {
       // Enable DTMF events so we can stop early on "1"
       conn.send("event plain DTMF");
       conn.send("event plain CHANNEL_DTMF");
+      const detachDtmfLogger = this.attachDtmfLogger(conn, callId);
 
       const outcome = await Promise.race([
         this.waitForDtmf1(conn, 20000),
@@ -556,7 +598,6 @@ export class EslCallHandlerService {
 
       if (outcome === "dtmf-1") {
         console.log("DTMF 1 received: stopping recording early");
-        await this.callService.pushEvent(call, "dtmf", { digit: "1" });
       } else {
         console.log("Recording duration complete");
       }
@@ -569,6 +610,7 @@ export class EslCallHandlerService {
         await this.execAndWait(conn, "playback", "tone_stream://%(200,0,880)", 5000);
       }
 
+      detachDtmfLogger();
       console.log(`Call flow setup completed for ${input.callUuid}`);
       return { callId, recordingPath };
     } catch (error) {
