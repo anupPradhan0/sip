@@ -92,7 +92,8 @@ export class CallService {
       direction: "outbound",
       // Outbound PSTN via Plivo uses FreeSWITCH as the media/control plane.
       provider: payload.provider === "plivo" ? "freeswitch" : payload.provider,
-      upstreamProvider: payload.provider === "plivo" ? "plivo" : undefined,
+      // Only set upstreamProvider together with upstreamCallId (unique index treats null upstreamCallId as duplicate).
+      upstreamProvider: undefined,
       ...(payload.provider === "plivo" ? { providerCallId: `pending-${outboundId.toString()}` } : {}),
       from: payload.from,
       to: payload.to,
