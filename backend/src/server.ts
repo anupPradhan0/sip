@@ -3,6 +3,7 @@ import { connectDatabase } from "./config/database";
 import { env } from "./config/env";
 import { AddressInfo } from "node:net";
 import { OrphanCallsRecoveryService } from "./services/recovery/orphan-calls-recovery.service";
+import { RecordingsSyncService } from "./services/recovery/recordings-sync.service";
 
 function listenWithPortFallback(startPort: number, maxAttempts = 10): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -43,9 +44,12 @@ async function bootstrap(): Promise<void> {
   await connectDatabase();
   
   const eslOutboundPort = parseInt(process.env.ESL_OUTBOUND_PORT || "3200", 10);
-  const recordingsDir = process.env.RECORDINGS_DIR;
+  const recordingsDir = process.env.RECORDINGS_DIR ?? "/recordings";
   const orphanGraceMs = Number(process.env.ORPHAN_GRACE_MS ?? 120000);
   const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? 60000);
+  const recordingsSyncGraceMs = Number(process.env.RECORDINGS_SYNC_GRACE_MS ?? 120000);
+  const recordingsSyncIntervalMs = Number(process.env.RECORDINGS_SYNC_INTERVAL_MS ?? 60000);
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim();
 
   console.log(`Starting ESL outbound server on port ${eslOutboundPort}`);
 
@@ -68,6 +72,16 @@ async function bootstrap(): Promise<void> {
   });
   await recovery.runOnce("startup");
   recovery.start();
+
+  // Backfill recordings in MongoDB from local WAVs on disk (idempotent upsert).
+  const recordingsSync = new RecordingsSyncService({
+    recordingsDir,
+    publicBaseUrl,
+    graceMs: recordingsSyncGraceMs,
+    sweepIntervalMs: recordingsSyncIntervalMs,
+  });
+  await recordingsSync.runOnce("startup");
+  recordingsSync.start();
 
   await eslServer.listen();
   console.log(`ESL outbound server listening on port ${eslOutboundPort}`);
