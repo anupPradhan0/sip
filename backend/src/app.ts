@@ -48,19 +48,67 @@ function getPublicBaseUrl(req: express.Request): string {
   return `${proto}://${host}`;
 }
 
+function firstPlivoString(val: unknown): string | undefined {
+  if (typeof val === "string" && val.trim().length > 0) return val.trim();
+  if (Array.isArray(val) && typeof val[0] === "string" && val[0].trim()) return val[0].trim();
+  return undefined;
+}
+
+/**
+ * Plivo may call the Answer URL with GET or POST. Custom SIP headers from `sipHeaders` on `calls.create`
+ * show up as `X-PH-KullooCallId` (see Plivo docs). They can appear in query string, form body, or with
+ * slightly different key spelling — merge sources and fall back to scanning keys.
+ */
+function extractPlivoKullooCallId(req: express.Request): string | undefined {
+  const query = req.query as Record<string, unknown>;
+  const body =
+    req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+
+  const directKeys = [
+    "kullooCallId",
+    "X-PH-KullooCallId",
+    "x-ph-kulloocallid",
+    "X_PH_KullooCallId",
+    "SipHeader_X-PH-KullooCallId",
+  ];
+
+  for (const src of [query, body]) {
+    for (const key of directKeys) {
+      const v = firstPlivoString(src[key]);
+      if (v && /^[a-fA-F0-9]{24}$/.test(v)) return v;
+    }
+  }
+
+  for (const src of [query, body]) {
+    for (const [key, val] of Object.entries(src)) {
+      if (/kulloocallid/i.test(key)) {
+        const v = firstPlivoString(val);
+        if (v && /^[a-fA-F0-9]{24}$/.test(v)) return v;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function plivoCallUuid(req: express.Request): string | undefined {
+  const query = req.query as Record<string, unknown>;
+  const body =
+    req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+  return firstPlivoString(query.CallUUID) ?? firstPlivoString(body.CallUUID);
+}
+
 function sendPlivoAnswerXml(req: express.Request, res: express.Response): void {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
 
-  const callUuid = (req.method === "GET" ? req.query.CallUUID : req.body?.CallUUID) as string | undefined;
-  const kullooCallId =
-    ((req.method === "GET" ? req.query.kullooCallId : req.body?.kullooCallId) as string | undefined) ??
-    // When Plivo passes custom headers, they may appear as query params like `X-PH-<Name>=<Value>`.
-    // Our TelephonyAdapter uses `sipHeaders: KullooCallId=<mongoObjectId>` which becomes `X-PH-KullooCallId`.
-    ((req.method === "GET" ? (req.query["X-PH-KullooCallId"] as unknown) : (req.body?.["X-PH-KullooCallId"] as unknown)) as
-      | string
-      | undefined);
+  const callUuid = plivoCallUuid(req);
+  const kullooCallId = extractPlivoKullooCallId(req);
   const baseUrl = getPublicBaseUrl(req);
   const freeswitchSipUri = process.env.FREESWITCH_SIP_URI?.trim();
 
@@ -85,8 +133,20 @@ function sendPlivoAnswerXml(req: express.Request, res: express.Response): void {
     typeof kullooCallId === "string" && /^[a-fA-F0-9]{24}$/.test(kullooCallId.trim())
       ? ` sipHeaders="KullooCallId=${kullooCallId.trim()}"`
       : "";
+  if (!kullooCallId && callUuid) {
+    logger.warn("plivo_answer_missing_kulloo_call_id", {
+      correlationId: req.correlationId,
+      method: req.method,
+      path: req.path,
+      plivoCallUuid: callUuid,
+      hint: "Check sipHeaders on calls.create and Plivo Answer URL method (GET vs POST).",
+    });
+  }
+
   logger.info("plivo_answer_bridge_to_freeswitch", {
     correlationId: req.correlationId,
+    method: req.method,
+    plPath: req.path,
     plivoCallUuid: callUuid ?? null,
     kullooCallId: typeof kullooCallId === "string" ? kullooCallId : null,
     hasSipHeaderReplay: Boolean(sipHeadersAttr),
