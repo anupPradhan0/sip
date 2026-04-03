@@ -23,6 +23,13 @@ export interface OutboundExecutionInput {
 }
 
 export class TelephonyAdapter {
+  /** Append one query param without breaking existing ?foo=bar on base URL. */
+  private static appendQueryParam(baseUrl: string, key: string, value: string): string {
+    const u = baseUrl.trim();
+    const pair = `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+    return u.includes("?") ? `${u}&${pair}` : `${u}?${pair}`;
+  }
+
   async executeOutboundHello(input: OutboundExecutionInput): Promise<OutboundExecutionResult> {
     if (input.provider === "twilio") {
       return this.executeTwilioHello(input);
@@ -103,15 +110,18 @@ export class TelephonyAdapter {
     const client = new plivo.Client(authId, authToken);
 
     const kullooCallId = input.kullooCallId ? String(input.kullooCallId).trim() : "";
-    // Plivo requires alphanumeric header name+value. Mongo ObjectId hex is safe.
-    const sipHeaders = kullooCallId && /^[a-fA-F0-9]{24}$/.test(kullooCallId)
-      ? `KullooCallId=${kullooCallId}`
-      : undefined;
+    const hasValidKullooId = kullooCallId.length > 0 && /^[a-fA-F0-9]{24}$/.test(kullooCallId);
+
+    // Plivo Answer URL may not echo sipHeaders on the HTTP callback; appending ?kullooCallId= is reliable for GET/POST.
+    const dialAnswerUrl = hasValidKullooId ? TelephonyAdapter.appendQueryParam(answerUrl, "kullooCallId", kullooCallId) : answerUrl;
+
+    // Plivo requires alphanumeric header name+value for SIP leg. Mongo ObjectId hex is safe.
+    const sipHeaders = hasValidKullooId ? `KullooCallId=${kullooCallId}` : undefined;
 
     const call = await client.calls.create(
       input.from,
       input.to,
-      answerUrl,
+      dialAnswerUrl,
       {
         answerMethod: "GET",
         ...(sipHeaders ? { sipHeaders } : {}),
