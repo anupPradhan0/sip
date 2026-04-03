@@ -3,30 +3,12 @@
 ## Purpose
 Lock the first production-like call flow before larger architecture changes.
 
-## Inbound Contract
-Flow: `receive -> answer -> play -> record -> hangup -> completed`
+## Real inbound (FreeSWITCH → ESL)
 
-### Endpoint
-- `POST /api/calls/inbound/hello`
+There is **no** HTTP “inbound hello” endpoint. PSTN/SIP callers hit **FreeSWITCH**; the dialplan connects to Kulloo via **ESL**. Calls are created in Mongo when `executeCallFlow` runs (`direction=inbound`, `providerCallId` = FreeSWITCH channel UUID).
 
-### Request
-```json
-{
-  "from": "sip:1001@local",
-  "to": "sip:hello@local",
-  "provider": "sip-local",
-  "providerCallId": "optional-external-id",
-  "recordingEnabled": true
-}
-```
+## Outbound hello (API → Plivo → FreeSWITCH → ESL)
 
-### Behavior
-1. Create a call record with `direction=inbound` and `status=received`.
-2. Persist ordered call events: `received`, `answered`, `played`, `recording_started`, `hangup`, `completed`.
-3. Create a recording metadata document when recording is enabled.
-4. Return final call and recording metadata.
-
-## Outbound Contract
 Flow: `initiate -> connect -> play -> record -> hangup -> completed`
 
 ### Endpoint
@@ -73,7 +55,7 @@ Flow: `initiate -> connect -> play -> record -> hangup -> completed`
 - Logs include `correlationId`, `callId`, `provider`, and current status.
 
 ## Acceptance Criteria
-1. Inbound hello-call ends in `completed` with persisted events.
+1. Real inbound calls (FS → ESL) persist `Call` + events to terminal status when ESL completes the flow.
 2. Outbound hello-call ends in `completed` for `sip-local`; `twilio` path accepted when credentials are configured.
 3. Recording metadata retrievable from API.
 4. 10-20 repeated calls complete without process crash.

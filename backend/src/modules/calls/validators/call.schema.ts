@@ -2,14 +2,6 @@ import { z } from "zod";
 
 const providerSchema = z.enum(["sip-local", "twilio", "plivo", "freeswitch"]);
 
-export const inboundHelloSchema = z.object({
-  from: z.string().trim().min(1, "from is required"),
-  to: z.string().trim().min(1, "to is required"),
-  provider: providerSchema.default("sip-local"),
-  providerCallId: z.string().trim().optional(),
-  recordingEnabled: z.boolean().default(true),
-});
-
 export const outboundHelloSchema = z.object({
   from: z.string().trim().min(1, "from is required"),
   to: z.string().trim().min(1, "to is required"),
@@ -51,5 +43,4 @@ export const freeswitchRecordingCallbackSchema = z.object({
   to: z.string().trim().optional(),
 });
 
-export type InboundHelloInput = z.infer<typeof inboundHelloSchema>;
 export type OutboundHelloInput = z.infer<typeof outboundHelloSchema>;

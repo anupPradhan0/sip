@@ -33,8 +33,6 @@ pnpm run dev
 ## First Milestone APIs
 Base URL: `http://localhost:5000/api`
 
-- `POST /calls/inbound/hello`  
-  Inbound flow: receive -> answer -> play -> record -> hangup
 - `POST /calls/outbound/hello`  
   Outbound flow with `Idempotency-Key` header
 - `GET /calls/:callId/recordings`  
@@ -54,13 +52,6 @@ Base URL: `http://localhost:5000/api`
   - `PLIVO_HANGUP_URL=https://<your-ngrok-domain>/plivo/hangup`
 
 ## Sample Requests
-Inbound hello call:
-```bash
-curl -X POST http://localhost:5000/api/calls/inbound/hello \
-  -H "Content-Type: application/json" \
-  -d '{"from":"sip:1001@local","to":"sip:hello@local","provider":"sip-local","recordingEnabled":true}'
-```
-
 Outbound hello call (SIP-local):
 ```bash
 curl -X POST http://localhost:5000/api/calls/outbound/hello \
@@ -87,11 +78,6 @@ curl -X POST http://localhost:5000/api/calls/outbound/hello \
 
 ## 10-20 Call Verification
 Run repeatability checks with script:
-
-Inbound SIP-like simulation:
-```bash
-pnpm run verify:hello inbound-sip 20 250
-```
 
 Outbound SIP-like simulation:
 ```bash

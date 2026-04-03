@@ -1,6 +1,6 @@
 import axios from "axios";
 
-type Mode = "inbound-sip" | "outbound-sip" | "outbound-pstn";
+type Mode = "outbound-sip" | "outbound-pstn";
 
 interface CliConfig {
   mode: Mode;
@@ -12,7 +12,7 @@ interface CliConfig {
 }
 
 function parseArgs(): CliConfig {
-  const mode = (process.argv[2] as Mode) || "inbound-sip";
+  const mode = (process.argv[2] as Mode) || "outbound-sip";
   const count = Number(process.argv[3] ?? 10);
   const delayMs = Number(process.argv[4] ?? 300);
 
@@ -20,8 +20,8 @@ function parseArgs(): CliConfig {
   const from = process.env.HELLO_CALL_FROM ?? "sip:1001@local";
   const to = process.env.HELLO_CALL_TO ?? "sip:hello@local";
 
-  if (!["inbound-sip", "outbound-sip", "outbound-pstn"].includes(mode)) {
-    throw new Error("Mode must be one of: inbound-sip | outbound-sip | outbound-pstn");
+  if (!["outbound-sip", "outbound-pstn"].includes(mode)) {
+    throw new Error("Mode must be one of: outbound-sip | outbound-pstn");
   }
 
   return { mode, count, delayMs, baseUrl, from, to };
@@ -38,16 +38,14 @@ async function run(): Promise<void> {
 
   for (let i = 0; i < config.count; i += 1) {
     try {
-      const isInbound = config.mode === "inbound-sip";
       const provider = config.mode === "outbound-pstn"
         ? (process.env.HELLO_CALL_PSTN_PROVIDER ?? "plivo")
         : "sip-local";
-      const endpoint = isInbound ? "/api/calls/inbound/hello" : "/api/calls/outbound/hello";
 
       const { data } = await axios.post<{
         data?: { call?: { _id?: string; status?: string }; recordings?: unknown[] };
       }>(
-        `${config.baseUrl}${endpoint}`,
+        `${config.baseUrl}/api/calls/outbound/hello`,
         {
           from: config.from,
           to: config.to,
@@ -57,7 +55,7 @@ async function run(): Promise<void> {
         {
           headers: {
             "Content-Type": "application/json",
-            ...(isInbound ? {} : { "Idempotency-Key": `hello-${Date.now()}-${i}` }),
+            "Idempotency-Key": `hello-${Date.now()}-${i}`,
           },
         },
       );

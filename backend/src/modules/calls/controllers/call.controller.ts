@@ -5,7 +5,6 @@ import { ApiError } from "../../../utils/api-error";
 import { parseWithSchema } from "../../../utils/zod-validate";
 import {
   callIdParamSchema,
-  inboundHelloSchema,
   outboundHelloSchema,
   plivoRecordingCallbackQuerySchema,
   plivoRecordingCallbackSchema,
@@ -61,16 +60,6 @@ export async function localRecordingFile(req: Request, res: Response, next: Next
     res.setHeader("Content-Type", "audio/wav");
     res.setHeader("Content-Disposition", `inline; filename="${uuid}.wav"`);
     res.sendFile(filePath);
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function inboundHelloCall(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const payload = parseWithSchema(inboundHelloSchema, req.body);
-    const result = await callService.runInboundHelloFlow(payload);
-    res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }

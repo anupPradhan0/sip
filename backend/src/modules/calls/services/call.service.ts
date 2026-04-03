@@ -4,7 +4,7 @@ import { ApiError } from "../../../utils/api-error";
 import { CallEventRepository } from "../repositories/call-event.repository";
 import { CallRepository } from "../repositories/call.repository";
 import { RecordingRepository } from "../repositories/recording.repository";
-import { InboundHelloInput, OutboundHelloInput } from "../validators/call.schema";
+import { OutboundHelloInput } from "../validators/call.schema";
 import { TelephonyAdapter } from "../adapters/telephony.adapter";
 import { CallDocument, CallProvider, CallStatus } from "../models/call.model";
 import { RecordingDocument } from "../models/recording.model";
@@ -21,57 +21,6 @@ export class CallService {
   public readonly callEventRepository = new CallEventRepository();
   public readonly recordingRepository = new RecordingRepository();
   private readonly telephonyAdapter = new TelephonyAdapter();
-
-  async runInboundHelloFlow(payload: InboundHelloInput): Promise<HelloFlowResult> {
-    const correlationId = randomUUID();
-    const now = new Date();
-    const call = await this.callRepository.create({
-      direction: "inbound",
-      provider: payload.provider,
-      from: payload.from,
-      to: payload.to,
-      status: "received",
-      correlationId,
-      providerCallId: payload.providerCallId,
-      recordingEnabled: payload.recordingEnabled,
-      timestamps: { receivedAt: now },
-    });
-
-    await this.pushEvent(call, "received", payload);
-
-    await this.setStatus(call._id.toString(), "answered", { answeredAt: new Date() });
-    await this.pushEvent(call, "answered");
-
-    await this.setStatus(call._id.toString(), "played", { playedAt: new Date() });
-    await this.pushEvent(call, "played", { message: "Hello from kulloo hello-call." });
-
-    const recordings: RecordingDocument[] = [];
-    if (payload.recordingEnabled) {
-      await this.setStatus(call._id.toString(), "recording_started", { recordingStartedAt: new Date() });
-      await this.pushEvent(call, "recording_started");
-      const localRecordingId = `rec-inbound-${Date.now()}`;
-      const recording = await this.recordingRepository.create({
-        callId: call._id,
-        provider: payload.provider,
-        providerRecordingId: localRecordingId,
-        status: "completed",
-        durationSec: 3,
-        retrievalUrl: `https://recordings.local/${localRecordingId}.wav`,
-      });
-      recordings.push(recording);
-    }
-
-    await this.setStatus(call._id.toString(), "hangup", { hangupAt: new Date() });
-    await this.pushEvent(call, "hangup");
-
-    const finalCall = await this.setStatus(call._id.toString(), "completed", { completedAt: new Date() });
-    await this.pushEvent(call, "completed");
-
-    return {
-      call: finalCall,
-      recordings,
-    };
-  }
 
   async runOutboundHelloFlow(payload: OutboundHelloInput, idempotencyKey: string): Promise<HelloFlowResult> {
     const existingCall = await this.callRepository.findByIdempotencyKey(idempotencyKey);

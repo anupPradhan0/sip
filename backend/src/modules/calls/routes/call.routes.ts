@@ -2,7 +2,6 @@ import { Router } from "express";
 import {
   getRecording,
   getRecordingFile,
-  inboundHelloCall,
   listCallRecordings,
   listLocalRecordings,
   localRecordingFile,
@@ -14,7 +13,6 @@ import {
 
 export const callRouter = Router();
 
-callRouter.post("/inbound/hello", inboundHelloCall);
 callRouter.post("/outbound/hello", outboundHelloCall);
 callRouter.get("/:callId/recordings", listCallRecordings);
 callRouter.post("/callbacks/twilio/recording", twilioRecordingCallback);

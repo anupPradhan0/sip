@@ -26,8 +26,6 @@ All routes below are relative to the base URL.
 
 ## Calls
 
-- `POST /api/calls/inbound/hello`
-  - Runs the inbound “hello” flow
 - `POST /api/calls/outbound/hello`
   - Runs the outbound “hello” flow
   - Required header: `Idempotency-Key: <unique>`
