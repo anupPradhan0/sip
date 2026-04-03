@@ -376,8 +376,6 @@ export class EslCallHandlerService {
 
   private async handleConnection(conn: Connection): Promise<void> {
     let callUuid: string | null = null;
-    let callId: string | null = null;
-    let recordingPath: string | null = null;
 
     try {
       // Wait for connection ready and get initial channel data
@@ -513,30 +511,6 @@ export class EslCallHandlerService {
         `Processing call ${callUuid} from ${finalFromE164 || fromRaw || "unknown"} to ${finalToE164 || toRaw || "unknown"}`,
       );
 
-      // Set up event listeners before executing call flow
-      conn.on("esl::event::RECORD_STOP::*", (evt: unknown) => {
-        const eslEvent = evt as { getHeader: (name: string) => string | undefined };
-        const recordFile = eslEvent.getHeader ? eslEvent.getHeader("Record-File-Path") : undefined;
-        console.log("Recording stopped event received", recordFile);
-        if (callId && callUuid && recordingPath) {
-          this.handleRecordingComplete(callId, callUuid, recordingPath).catch((err) => {
-            console.error("Error handling recording completion:", err);
-          });
-        }
-      });
-
-      conn.on("esl::event::CHANNEL_HANGUP::*", () => {
-        console.log("Call hung up");
-        if (callId) {
-          this.callService.setStatus(callId, "hangup", { hangupAt: new Date() }).catch((err) => {
-            console.error("Error updating call status to hangup:", err);
-          });
-          this.callService.setStatus(callId, "completed", { completedAt: new Date() }).catch((err) => {
-            console.error("Error updating call status to completed:", err);
-          });
-        }
-      });
-
       conn.on("esl::end", () => {
         console.log("ESL connection ended");
         if (callUuid) {
@@ -544,8 +518,9 @@ export class EslCallHandlerService {
         }
       });
 
-      // Execute call flow
-      const result = await this.executeCallFlow(conn, {
+      // Execute call flow (final recording + hangup status is applied inside executeCallFlow;
+      // outer callId was previously null during CHANNEL_HANGUP/RECORD_STOP, so those listeners never ran.)
+      await this.executeCallFlow(conn, {
         callUuid: callUuid ?? connectData.callUuid,
         fromRaw,
         toRaw,
@@ -554,9 +529,6 @@ export class EslCallHandlerService {
         callerName: callerName ?? undefined,
         kullooCallId,
       });
-
-      callId = result.callId;
-      recordingPath = result.recordingPath;
     } catch (error) {
       console.error("Error in ESL connection handler:", error);
       if (callUuid) {
@@ -725,6 +697,13 @@ export class EslCallHandlerService {
       await this.execAndWait(conn, "stop_record_session", recordingPath, EslCallHandlerService.STOP_RECORD_TIMEOUT_MS);
       this.log(ctx, "info", "Recording stopped");
 
+      // Do not rely on RECORD_STOP / CHANNEL_HANGUP handlers in handleConnection — outer `callId` was null until now.
+      try {
+        await this.handleRecordingComplete(callId, input.callUuid, recordingPath);
+      } catch (err) {
+        this.log(ctx, "error", "handleRecordingComplete failed after stop_record_session", err);
+      }
+
       if (outcome === "dtmf-1") {
         // Confirmation tone (no external sound files required)
         await this.execAndWait(conn, "playback", "tone_stream://%(200,0,880)", 5000);
@@ -733,6 +712,14 @@ export class EslCallHandlerService {
       detachDtmfLogger();
       // Hard hangup to enforce max duration; this matches the desired outbound behavior.
       await this.execAndWait(conn, "hangup", "", EslCallHandlerService.HANGUP_TIMEOUT_MS);
+      console.log("Call hung up");
+
+      const hangupAt = new Date();
+      await this.callService.setStatus(callId, "hangup", { hangupAt });
+      await this.callService.pushEvent(call, "hangup");
+      await this.callService.setStatus(callId, "completed", { completedAt: new Date() });
+      await this.callService.pushEvent(call, "completed");
+
       this.log(ctx, "info", `Call flow setup completed for ${input.callUuid}`);
       metrics.decActiveCalls();
       return { callId, recordingPath };
