@@ -156,6 +156,7 @@ Firewall rules must allow **SIP** (typically **5060** TCP/UDP), **RTP** (your `v
 
 | Doc | Topic |
 |-----|--------|
+| [esl.md](./esl.md) | What ESL is, outbound socket vs FS:8021, data flow |
 | [inbound-call-dataflow.md](./inbound-call-dataflow.md) | Inbound DID → Answer URL → FS → ESL → Mongo |
 | [outbound-calls.md](./outbound-calls.md) | Outbound API → Plivo → FS → ESL, `KullooCallId` |
 | [api.md](./api.md) | HTTP routes, callbacks |

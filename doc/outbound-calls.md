@@ -229,6 +229,7 @@ During recording, ESL subscribes to DTMF events. Digit **`1`** stops recording e
 ## 15. Related docs
 
 - `doc/api.md` — HTTP surface
+- `doc/esl.md` — ESL concepts and data flow (FreeSWITCH → Kulloo)
 - `doc/hello-call-contract.md` — hello contracts (outbound + real inbound via FS)
 - `doc/stability.md` — operational stability notes
 

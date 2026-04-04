@@ -201,7 +201,7 @@ See `doc/stability.md` for the full checklist (idempotency, webhook signing, ESL
 - `doc/hello-call-contract.md` — hello contract summary
 - `doc/api.md` — full HTTP surface
 - `doc/stability.md` — operational stability
-- `doc/ESL_IMPLEMENTATION_SUMMARY.md` — ESL architecture notes
+- `doc/esl.md` — what ESL is, Kulloo usage, data flow
 
 ---
 

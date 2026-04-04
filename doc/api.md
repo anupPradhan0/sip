@@ -6,6 +6,8 @@ All routes below are relative to the base URL.
 
 Optional **Redis** (`REDIS_URL`) enables idempotency caching and recording webhook dedupe; see [redis.md](./redis.md).
 
+**ESL** (Event Socket: FreeSWITCH → Kulloo on `ESL_OUTBOUND_PORT`) drives the hello media flow; see [esl.md](./esl.md).
+
 ## Health
 
 - `GET /api/health/live`
