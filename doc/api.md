@@ -4,7 +4,7 @@ Base URL (production): `https://kulloocall.anuppradhan.in`
 
 All routes below are relative to the base URL.
 
-Optional **Redis** (`REDIS_URL`) enables idempotency caching and recording webhook dedupe; see [redis.md](./redis.md).
+**Redis** (`REDIS_URL`) is **required**: the API exits on startup if it is missing or unreachable, and readiness always checks **`PING`**. See [redis.md](./redis.md).
 
 **ESL** (Event Socket: FreeSWITCH → Kulloo on `ESL_OUTBOUND_PORT`) drives the hello media flow; see [esl.md](./esl.md).
 
@@ -13,7 +13,7 @@ Optional **Redis** (`REDIS_URL`) enables idempotency caching and recording webho
 - `GET /api/health/live`
   - Liveness probe (process responding)
 - `GET /api/health`
-  - Readiness probe (includes Mongo ping)
+  - Readiness probe (Mongo ping + Redis `PING`)
 
 ## Users
 

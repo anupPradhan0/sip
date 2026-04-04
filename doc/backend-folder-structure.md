@@ -263,7 +263,7 @@ Sorted like `find backend -type f ! -path '*/node_modules/*' ! -path '*/dist/*' 
 
 | File | Purpose |
 |------|---------|
-| **`server.ts`** | Boot: MongoDB, ESL outbound server, recovery timers, HTTP server, Redis shutdown hooks. |
+| **`server.ts`** | Boot: MongoDB, Redis `assertRedisAvailable`, ESL outbound server, recovery timers, HTTP server, Redis shutdown hooks. |
 | **`app.ts`** | Express app: CORS/helmet/morgan, JSON parsers, **`correlationIdMiddleware`**, **`registerPlivoWebhookRoutes`** (Plivo Answer/Hangup at `/plivo/*` and `/api/plivo/*`), **`/api`** router, error handlers. |
 
 ---
@@ -299,7 +299,7 @@ Sorted like `find backend -type f ! -path '*/node_modules/*' ! -path '*/dist/*' 
 
 | Path | Purpose |
 |------|---------|
-| **`readiness.service.ts`** | Mongo ping + optional Redis ping; builds readiness payload for the health controller. |
+| **`readiness.service.ts`** | Mongo ping + Redis ping; builds readiness payload for the health controller. |
 
 ---
 
@@ -368,7 +368,7 @@ Sorted like `find backend -type f ! -path '*/node_modules/*' ! -path '*/dist/*' 
 3. **Outbound hello** — `call.routes` → `call.controller` → `call.service` → `telephony.adapter` + Mongo.
 4. **Media (FS path)** — FreeSWITCH `socket` → **`esl-call-handler.service`** → **`CallService`** (status, events, recordings).
 5. **Recovery** — `server.ts` starts orphan + recordings sync; they use repositories, not raw models.
-6. **Readiness** — `health.routes` → **`health.controller`** → **`readiness.service`** (Mongo + optional Redis).
+6. **Readiness** — `health.routes` → **`health.controller`** → **`readiness.service`** (Mongo + Redis).
 
 ---
 

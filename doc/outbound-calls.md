@@ -17,6 +17,7 @@ This document describes how **outbound PSTN** (and related) calls work in Kulloo
 | **FreeSWITCH** | Media plane: answer, tone, `record_session`, DTMF, hangup. |
 | **ESL (Event Socket, outbound mode)** | Node listens on `ESL_OUTBOUND_PORT`; FreeSWITCH `socket` app connects **in** to Kulloo and runs the scripted flow in `esl-call-handler.service.ts`. |
 | **MongoDB** | `Call`, `CallEvent`, `Recording` — keyed by a stable business id plus provider-specific ids. |
+| **Redis (required)** | **`REDIS_URL`** must be set and reachable at startup: **idempotency cache** for repeat `Idempotency-Key` on outbound hello (Mongo stays authoritative); **dedupe** for recording webhooks. See **`doc/redis.md`**. |
 
 Recording for the **Plivo + FreeSWITCH** path is **not** primarily Plivo’s cloud recording for this hello flow; the WAV is written by **FreeSWITCH** under `RECORDINGS_DIR` and metadata is updated from ESL.
 
@@ -79,12 +80,14 @@ sequenceDiagram
 
 **Important:** The HTTP response from `POST /api/calls/outbound/hello` returns when **Plivo has accepted the dial** and the `Call` is **`connected`** (for `provider: "plivo"`). Final states (`answered`, `played`, `recording_started`, `hangup`, `completed`) and `Recording` rows are updated **asynchronously** by ESL while the call runs.
 
+**Redis:** `runOutboundHelloFlow` first checks an **idempotency cache** (hashed `Idempotency-Key` → Mongo `Call._id`) before hitting Mongo’s `findByIdempotencyKey`; after create or Mongo hit it **writes** the cache with TTL. **Mongo remains authoritative** (unique `idempotencyKey` index). Repeat requests with the same key still return the existing call **without** a second Plivo dial. Details: **`doc/redis.md`**.
+
 ---
 
 ## 5. HTTP API
 
 - **Route:** `POST /api/calls/outbound/hello`
-- **Required header:** `Idempotency-Key` — duplicate key returns the **existing** `Call` and its recordings list without placing a second dial.
+- **Required header:** `Idempotency-Key` — duplicate key returns the **existing** `Call` and its recordings list without placing a second dial (enforced in Mongo; **Redis cache** accelerates repeat lookups).
 - **Body (Zod):** `from`, `to`, `provider` (`sip-local` \| `twilio` \| `plivo` \| `freeswitch`), `recordingEnabled` (default `true`).
 
 ### Behavior by `provider`
@@ -174,6 +177,8 @@ Unique indexes (see `call.model.ts`):
 - **`CallEvent`:** `pushEvent` records `initiated`, `connected`, `answered`, `played`, `recording_started`, DTMF, `hangup`, `completed`, `failed`, etc. Uses `call.correlationId` on the event row.
 - **`Recording`:** For Plivo+FS hello, primary path is **FS file** + ESL **`handleRecordingComplete`**. `providerRecordingId` is often the **FS UUID**; `callId` references the `Call` document. Retrieval may use `/api/recordings/local/:uuid` when served from disk.
 
+**Recording webhooks and Redis:** `POST /api/calls/callbacks/twilio/recording`, `…/plivo/recording`, and `…/freeswitch/recording` use **Redis dedupe** (`SET … NX` + TTL), so provider retries return **`200`** with `{ duplicate: true }` without double ingestion.
+
 ---
 
 ## 11. DTMF
@@ -195,6 +200,8 @@ During recording, ESL subscribes to DTMF events. Digit **`1`** stops recording e
 | `RECORDINGS_DIR` | WAV directory (shared volume with FS in production) |
 | `ESL_OUTBOUND_PORT` | Port Kulloo listens on for FS outbound socket (e.g. 3200) |
 | `FREESWITCH_ESL_*` | Optional for inbound ESL client patterns; outbound socket is separate |
+| `REDIS_URL` | **Required** — idempotency cache + recording webhook dedupe; API fails startup without it; **`GET /api/health`** always includes Redis **PING** |
+| `REDIS_KEY_PREFIX`, `REDIS_IDEMPOTENCY_TTL_SEC`, `REDIS_WEBHOOK_DEDUPE_TTL_SEC` | Optional tuning; see **`doc/redis.md`** |
 
 ---
 
@@ -205,6 +212,7 @@ During recording, ESL subscribes to DTMF events. Digit **`1`** stops recording e
 - **`E11000` on `upstreamProvider` + `upstreamCallId`:** Do not set `upstreamProvider` without Plivo’s id yet.
 - **API stuck at `connected`:** Normal until ESL runs; verify FS reaches Kulloo on `ESL_OUTBOUND_PORT` and dialplan matches `FREESWITCH_SIP_URI`.
 - **Wrong `to` saved as `1000`:** ESL attach should preserve API `from`/`to`; if not, correlation may have fallen through to inbound `findOrCreate` path.
+- **`GET /api/health` returns 503:** Mongo or Redis check failed — fix **`MONGODB_URI`** / **`REDIS_URL`** and connectivity (the API does not start if Redis is missing or down at bootstrap).
 
 ---
 
@@ -223,6 +231,7 @@ During recording, ESL subscribes to DTMF events. Digit **`1`** stops recording e
 | ESL | `backend/src/services/freeswitch/esl-call-handler.service.ts` |
 | FS dialplan example | `freeswitch/conf/dialplan/hello.xml` |
 | Bootstrap ESL port | `backend/src/server.ts` |
+| Redis client + idempotency / webhook helpers | `backend/src/services/redis/*.ts` |
 
 ---
 
@@ -230,9 +239,10 @@ During recording, ESL subscribes to DTMF events. Digit **`1`** stops recording e
 
 - `doc/api.md` — HTTP surface
 - `doc/esl.md` — ESL concepts and data flow (FreeSWITCH → Kulloo)
+- `doc/redis.md` — required Redis (outbound idempotency cache, webhook dedupe, health)
 - `doc/hello-call-contract.md` — hello contracts (outbound + real inbound via FS)
 - `doc/stability.md` — operational stability notes
 
 ---
 
-*Last updated to reflect the Kulloo repo layout and Plivo + FreeSWITCH + ESL outbound hello flow.*
+*Last updated to reflect the Kulloo repo layout, Plivo + FreeSWITCH + ESL outbound hello flow, and required Redis.*

@@ -159,13 +159,22 @@ Started from `server.ts`:
 
 See `doc/stability.md` for the full checklist (idempotency, webhook signing, ESL timeouts, observability).
 
+### Redis (`REDIS_URL`, required)
+
+Redis is **not** on the Plivo → Answer URL → FreeSWITCH → ESL path itself (no Redis lookup during ESL). The API **requires** Redis at startup. It **does** affect **HTTP recording webhooks** when you use provider-hosted recording callbacks:
+
+- **`POST /api/calls/callbacks/plivo/recording`**, **`…/twilio/recording`**, **`…/freeswitch/recording`** — duplicate deliveries of the **same** callback identity are answered with **`200`** and `{ success: true, duplicate: true }` without re-running ingestion (`SET … NX` with TTL). See **`doc/redis.md`**.
+
+The **primary** inbound hello recording path here is **FreeSWITCH WAV + ESL**; Plivo/Twilio recording callbacks matter when you integrate those providers’ recording webhooks for the same or other flows.
+
 ---
 
 ## 10. Observability
 
 - HTTP: **`X-Correlation-Id`** on Plivo Answer requests (Express middleware).
 - ESL logs: structured fields such as `callId`, `callSid`, `channelUuid`, `correlationId` (from the **Call** document once known).
-- **`GET /api/metrics`**: active calls, failed calls, recording failures, DTMF count.
+- **`GET /api/metrics`**: active calls, failed calls, recording failures, DTMF count; also **`redisIdempotencyHits`**, **`redisIdempotencyMisses`**, **`webhookDedupeSkips`** (see `doc/redis.md`).
+- **`GET /api/health`**: readiness always includes a Redis **`PING`**; failure returns **503** until Redis responds.
 
 ---
 
@@ -190,6 +199,7 @@ See `doc/stability.md` for the full checklist (idempotency, webhook signing, ESL
 | Call / recording models | `backend/src/modules/calls/models/*.ts` |
 | Idempotent create | `backend/src/modules/calls/repositories/call.repository.ts` |
 | Orphan / recording sync | `backend/src/services/recovery/*.ts` |
+| Redis (webhooks / health / startup) | `backend/src/services/redis/*.ts`, `backend/src/config/env.ts` |
 | ESL bootstrap | `backend/src/server.ts` |
 | Dialplan example | `freeswitch/conf/dialplan/hello.xml` |
 
@@ -202,7 +212,8 @@ See `doc/stability.md` for the full checklist (idempotency, webhook signing, ESL
 - `doc/api.md` — full HTTP surface
 - `doc/stability.md` — operational stability
 - `doc/esl.md` — what ESL is, Kulloo usage, data flow
+- `doc/redis.md` — required Redis (webhook dedupe, health, metrics, startup)
 
 ---
 
-*Last updated to match the Kulloo repo: Plivo Answer URL → FreeSWITCH → outbound ESL → MongoDB.*
+*Last updated to match the Kulloo repo: Plivo Answer URL → FreeSWITCH → outbound ESL → MongoDB; required Redis for callbacks, readiness, and startup.*

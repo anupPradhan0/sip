@@ -6,7 +6,7 @@ import type { EslCallHandlerService } from "./services/freeswitch/esl-call-handl
 import { OrphanCallsRecoveryService } from "./services/recovery/orphan-calls-recovery.service";
 import { RecordingsSyncService } from "./services/recovery/recordings-sync.service";
 import { logger } from "./utils/logger";
-import { disconnectRedis } from "./services/redis/redis.client";
+import { assertRedisAvailable, disconnectRedis } from "./services/redis/redis.client";
 
 function shutdownRedis(): void {
   void disconnectRedis().catch(() => undefined);
@@ -48,14 +48,15 @@ function listenWithPortFallback(startPort: number, maxAttempts = 10): Promise<vo
 
 async function bootstrap(): Promise<void> {
   await connectDatabase();
-  
-  const eslOutboundPort = parseInt(process.env.ESL_OUTBOUND_PORT || "3200", 10);
-  const recordingsDir = process.env.RECORDINGS_DIR ?? "/recordings";
-  const orphanGraceMs = Number(process.env.ORPHAN_GRACE_MS ?? 120000);
-  const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? 60000);
-  const recordingsSyncGraceMs = Number(process.env.RECORDINGS_SYNC_GRACE_MS ?? 120000);
-  const recordingsSyncIntervalMs = Number(process.env.RECORDINGS_SYNC_INTERVAL_MS ?? 60000);
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim();
+  await assertRedisAvailable();
+
+  const eslOutboundPort = env.eslOutboundPort;
+  const recordingsDir = env.recordingsDirRaw ?? "/recordings";
+  const orphanGraceMs = env.orphanGraceMs;
+  const orphanSweepIntervalMs = env.orphanSweepIntervalMs;
+  const recordingsSyncGraceMs = env.recordingsSyncGraceMs;
+  const recordingsSyncIntervalMs = env.recordingsSyncIntervalMs;
+  const publicBaseUrl = env.publicBaseUrl;
 
   logger.info("bootstrap_starting_esl_server", { eslOutboundPort });
 

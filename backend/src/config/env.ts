@@ -18,7 +18,7 @@ export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? DEFAULT_PORT),
   mongoUri: process.env.MONGODB_URI ?? DEFAULT_MONGO_URI,
-  /** When set, enables Redis-backed idempotency cache and webhook deduplication. */
+  /** Required at runtime: idempotency cache + webhook deduplication (`assertRedisAvailable` in `server.ts`). */
   redisUrl: process.env.REDIS_URL?.trim() || undefined,
   redisKeyPrefix: process.env.REDIS_KEY_PREFIX?.trim() || "kulloo:",
   redisIdempotencyTtlSec: parseIntEnv("REDIS_IDEMPOTENCY_TTL_SEC", 86_400),
@@ -35,6 +35,17 @@ export const env = {
   plivoAuthToken: process.env.PLIVO_AUTH_TOKEN?.trim() || undefined,
   plivoAnswerUrl: process.env.PLIVO_ANSWER_URL?.trim() || undefined,
   plivoHangupUrl: process.env.PLIVO_HANGUP_URL?.trim() || undefined,
+  /** Outbound ESL TCP port (FreeSWITCH `socket` connects here). */
+  eslOutboundPort: parseIntEnv("ESL_OUTBOUND_PORT", 3200),
+  /**
+   * Optional recordings root. When unset, `server` defaults to `/recordings`;
+   * `call.service` register paths use `../recordings` relative to cwd; list/stream use `/recordings`.
+   */
+  recordingsDirRaw: process.env.RECORDINGS_DIR?.trim() || undefined,
+  orphanGraceMs: Number(process.env.ORPHAN_GRACE_MS ?? 120000),
+  orphanSweepIntervalMs: Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? 60000),
+  recordingsSyncGraceMs: Number(process.env.RECORDINGS_SYNC_GRACE_MS ?? 120000),
+  recordingsSyncIntervalMs: Number(process.env.RECORDINGS_SYNC_INTERVAL_MS ?? 60000),
 };
 
 export function isRedisConfigured(): boolean {

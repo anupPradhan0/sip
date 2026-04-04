@@ -2,7 +2,7 @@
 #
 # On your VPS (with repo cloned):
 #   cp backend/.env.example .env
-#   # edit .env — set MONGODB_URI=mongodb://mongodb:27017/sip-backend, REDIS_URL=redis://redis:6379 (optional), PUBLIC_BASE_URL, Plivo/Twilio, etc.
+#   # edit .env — set MONGODB_URI=mongodb://mongodb:27017/sip-backend, REDIS_URL=redis://redis:6379 (required; compose sets this on api by default), PUBLIC_BASE_URL, Plivo/Twilio, etc.
 #   docker compose -f docker-compose.server.yml up -d --build
 #
 # API: http://<host>:5000  — health: GET /api/health

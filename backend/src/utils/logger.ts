@@ -19,14 +19,14 @@ function envLevel(): LogLevel {
   if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") {
     return raw;
   }
-  return process.env.NODE_ENV === "production" ? "info" : "debug";
+  return env.nodeEnv === "production" ? "info" : "debug";
 }
 
 const minRank = () => LEVEL_RANK[envLevel()];
 
 function useJsonLines(): boolean {
   if (env.logFormat?.toLowerCase() === "pretty") return false;
-  return process.env.NODE_ENV === "production";
+  return env.nodeEnv === "production";
 }
 
 export function serializeError(err: unknown): Record<string, string | undefined> {

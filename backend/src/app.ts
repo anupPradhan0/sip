@@ -6,6 +6,7 @@ import { apiRouter } from "./routes";
 import { errorHandler, notFoundHandler } from "./middlewares/error.middleware";
 import { correlationIdMiddleware } from "./middlewares/correlation.middleware";
 import { registerPlivoWebhookRoutes } from "./modules/calls/routes/plivo.webhooks";
+import { env } from "./config/env";
 
 export const app = express();
 
@@ -16,7 +17,7 @@ app.use(cors());
 app.use(helmet());
 
 morgan.token("correlation-id", (req: express.Request) => req.correlationId ?? "-");
-if (process.env.NODE_ENV === "production") {
+if (env.nodeEnv === "production") {
   app.use(
     morgan(
       ':correlation-id :remote-addr :method :url HTTP/:http-version :status :res[content-length] - :response-time ms',

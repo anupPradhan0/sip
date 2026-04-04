@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import { isRedisConfigured } from "../../config/env";
 import { pingRedis } from "../redis/redis.client";
 
 export async function checkMongoPing(): Promise<{
@@ -37,34 +36,21 @@ export async function getReadinessPayload(): Promise<{
   message: string;
   checks: {
     mongodb: Awaited<ReturnType<typeof checkMongoPing>>;
-    redis:
-      | { configured: boolean; ok: boolean; latencyMs?: number; error?: string }
-      | { configured: false; ok: true };
+    redis: { configured: true; ok: boolean; latencyMs?: number; error?: string };
   };
   uptimeSeconds: number;
   timestamp: string;
 }> {
   const mongo = await checkMongoPing();
-
-  let redis: {
-    configured: boolean;
-    ok: boolean;
-    latencyMs?: number;
-    error?: string;
+  const ping = await pingRedis();
+  const redis = {
+    configured: true as const,
+    ok: ping.ok,
+    latencyMs: ping.latencyMs,
+    ...(ping.error ? { error: ping.error } : {}),
   };
-  if (isRedisConfigured()) {
-    const ping = await pingRedis();
-    redis = {
-      configured: true,
-      ok: ping.ok,
-      latencyMs: ping.latencyMs,
-      ...(ping.error ? { error: ping.error } : {}),
-    };
-  } else {
-    redis = { configured: false, ok: true };
-  }
 
-  const ok = mongo.ok && (!redis.configured || redis.ok);
+  const ok = mongo.ok && redis.ok;
   const status = ok ? "ok" : "degraded";
 
   return {

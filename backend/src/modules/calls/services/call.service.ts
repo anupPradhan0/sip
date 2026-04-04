@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Types } from "mongoose";
 import { ApiError } from "../../../utils/api-error";
-import { isRedisConfigured } from "../../../config/env";
+import { env } from "../../../config/env";
 import { metrics } from "../../../services/observability/metrics.service";
 import {
   peekCachedCallIdForIdempotencyKey,
@@ -34,20 +34,18 @@ export class CallService {
   private readonly telephonyAdapter = new TelephonyAdapter();
 
   async runOutboundHelloFlow(payload: OutboundHelloInput, idempotencyKey: string): Promise<HelloFlowResult> {
-    if (isRedisConfigured()) {
-      const cachedId = await peekCachedCallIdForIdempotencyKey(idempotencyKey);
-      if (cachedId) {
-        const fromCache = await this.callRepository.findById(cachedId);
-        if (fromCache && fromCache.idempotencyKey === idempotencyKey) {
-          metrics.incCounter("redisIdempotencyHits");
-          return {
-            call: fromCache,
-            recordings: await this.recordingRepository.listByCallId(fromCache._id.toString()),
-          };
-        }
+    const cachedId = await peekCachedCallIdForIdempotencyKey(idempotencyKey);
+    if (cachedId) {
+      const fromCache = await this.callRepository.findById(cachedId);
+      if (fromCache && fromCache.idempotencyKey === idempotencyKey) {
+        metrics.incCounter("redisIdempotencyHits");
+        return {
+          call: fromCache,
+          recordings: await this.recordingRepository.listByCallId(fromCache._id.toString()),
+        };
       }
-      metrics.incCounter("redisIdempotencyMisses");
     }
+    metrics.incCounter("redisIdempotencyMisses");
 
     const existingCall = await this.callRepository.findByIdempotencyKey(idempotencyKey);
     if (existingCall) {
@@ -265,8 +263,8 @@ export class CallService {
       throw new ApiError("Call not found", 404);
     }
 
-    const recordingsDir = process.env.RECORDINGS_DIR
-      ? path.resolve(process.env.RECORDINGS_DIR)
+    const recordingsDir = env.recordingsDirRaw
+      ? path.resolve(env.recordingsDirRaw)
       : path.resolve(process.cwd(), "..", "recordings");
     const filePath = path.join(recordingsDir, `${callUuid}.wav`);
 
@@ -327,8 +325,8 @@ export class CallService {
       console.log(`Created freeswitch Call for recording callback callUuid=${input.callUuid}`);
     }
 
-    const recordingsDir = process.env.RECORDINGS_DIR
-      ? path.resolve(process.env.RECORDINGS_DIR)
+    const recordingsDir = env.recordingsDirRaw
+      ? path.resolve(env.recordingsDirRaw)
       : path.resolve(process.cwd(), "..", "recordings");
     const filePath = path.join(recordingsDir, `${input.callUuid}.wav`);
 
@@ -398,7 +396,7 @@ export class CallService {
   }
 
   async listLocalWavSummaries(): Promise<Array<{ uuid: string; filename: string; url: string }>> {
-    const dir = path.resolve(process.env.RECORDINGS_DIR ?? "/recordings");
+    const dir = path.resolve(env.recordingsDirRaw ?? "/recordings");
     let files: string[] = [];
     try {
       const entries = await fs.readdir(dir);
@@ -418,7 +416,7 @@ export class CallService {
     if (!uuid || !/^[\w-]+$/.test(uuid)) {
       throw new ApiError("Invalid recording UUID", 400);
     }
-    const dir = path.resolve(process.env.RECORDINGS_DIR ?? "/recordings");
+    const dir = path.resolve(env.recordingsDirRaw ?? "/recordings");
     const filePath = path.join(dir, `${uuid}.wav`);
     try {
       await fs.stat(filePath);

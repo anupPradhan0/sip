@@ -8,12 +8,9 @@ function redisKeyForIdempotency(idempotencyKey: string): string {
   return `${env.redisKeyPrefix}idempo:${digest}`;
 }
 
-/** Returns cached Mongo call id when present and valid; no Redis = undefined. */
+/** Returns cached Mongo call id when present and valid. */
 export async function peekCachedCallIdForIdempotencyKey(idempotencyKey: string): Promise<string | undefined> {
   const redis = getRedis();
-  if (!redis) {
-    return undefined;
-  }
   const raw = await redis.get(redisKeyForIdempotency(idempotencyKey));
   if (!raw || !Types.ObjectId.isValid(raw)) {
     return undefined;
@@ -23,8 +20,5 @@ export async function peekCachedCallIdForIdempotencyKey(idempotencyKey: string):
 
 export async function setCachedCallIdForIdempotencyKey(idempotencyKey: string, callId: string): Promise<void> {
   const redis = getRedis();
-  if (!redis) {
-    return;
-  }
   await redis.set(redisKeyForIdempotency(idempotencyKey), callId, "EX", env.redisIdempotencyTtlSec);
 }

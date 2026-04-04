@@ -4,9 +4,12 @@ import { logger } from "../../utils/logger";
 
 let client: Redis | null = null;
 
-export function getRedis(): Redis | null {
+/**
+ * Returns the shared Redis client. Requires `REDIS_URL` and successful startup `assertRedisAvailable()`.
+ */
+export function getRedis(): Redis {
   if (!isRedisConfigured()) {
-    return null;
+    throw new Error("REDIS_URL is required but not set");
   }
   if (!client) {
     client = new Redis(env.redisUrl as string, {
@@ -30,13 +33,10 @@ export function getRedis(): Redis | null {
 
 export async function pingRedis(): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
   if (!isRedisConfigured()) {
-    return { ok: true, latencyMs: undefined };
-  }
-  const redis = getRedis();
-  if (!redis) {
-    return { ok: false, error: "client not initialized" };
+    return { ok: false, error: "REDIS_URL is not set" };
   }
   try {
+    const redis = getRedis();
     const started = Date.now();
     await redis.ping();
     return { ok: true, latencyMs: Date.now() - started };
@@ -46,6 +46,23 @@ export async function pingRedis(): Promise<{ ok: boolean; latencyMs?: number; er
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/** Fails fast if Redis is not configured or does not respond to PING. Call during bootstrap after Mongo. */
+export async function assertRedisAvailable(): Promise<void> {
+  if (!isRedisConfigured()) {
+    const message =
+      "REDIS_URL is required. Set it (e.g. redis://localhost:6379 or redis://redis:6379 in Docker).";
+    logger.error("bootstrap_redis_required", { message });
+    throw new Error(message);
+  }
+  const ping = await pingRedis();
+  if (!ping.ok) {
+    const message = `Redis is unreachable: ${ping.error ?? "unknown"}`;
+    logger.error("bootstrap_redis_unreachable", { error: ping.error });
+    throw new Error(message);
+  }
+  logger.info("bootstrap_redis_ok", { latencyMs: ping.latencyMs });
 }
 
 export async function disconnectRedis(): Promise<void> {
