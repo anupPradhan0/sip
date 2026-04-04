@@ -1,5 +1,7 @@
 # Kulloo backend — complete folder and file reference
 
+> **Doc hub:** [Documentation index](../README.md) — project overview and telephony docs live there.
+
 This document reflects **every directory** and **every file** under repository path **`backend/`** as of the last refresh.
 
 **Exception:** The **`node_modules/`** directory is listed as a single entry. Its **inner** files are third-party packages (thousands of files) and are **not** listed one-by-one.

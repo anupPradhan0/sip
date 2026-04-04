@@ -1,5 +1,7 @@
 # Inbound calls (Kulloo)
 
+> **Doc hub:** [Documentation index](../README.md) — pair with [outbound-calls.md](./outbound-calls.md) and [esl.md](./esl.md).
+
 This document describes how **inbound** PSTN/SIP calls reach Kulloo, how they differ from **outbound**, and the **data flow** from the carrier edge through FreeSWITCH to MongoDB. It matches the current backend under `backend/` and the ESL handler in `esl-call-handler.service.ts`.
 
 ---

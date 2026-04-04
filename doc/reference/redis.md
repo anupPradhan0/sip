@@ -1,5 +1,7 @@
 # Redis in Kulloo
 
+> **Doc hub:** [Documentation index](../README.md) — HTTP surface and telephony context are linked from there.
+
 Redis is **required** for the Kulloo API process: **`REDIS_URL`** must be set and Redis must answer **`PING`** before the HTTP server and ESL bootstrap continue. If either fails, startup exits with an error.
 
 Redis does **not** replace Mongo as the system of record for calls, events, or recordings. It provides **idempotency acceleration**, **recording webhook deduplication**, readiness checks, and related metrics.

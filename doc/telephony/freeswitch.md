@@ -1,5 +1,7 @@
 # FreeSWITCH in Kulloo
 
+> **Doc hub:** [Documentation index](../README.md) — ESL and call flows are in the other `doc/telephony/` files.
+
 This document describes **what FreeSWITCH does** in this project, **how the checked-in configuration is structured**, and the **end-to-end data flow** from SIP/RTP through FreeSWITCH to the Kulloo backend (MongoDB, recordings). It matches the files under `freeswitch/conf/` and the backend ESL handler in `backend/src/services/freeswitch/esl-call-handler.service.ts`.
 
 ---

@@ -2,6 +2,8 @@
 
 TypeScript + Express + MongoDB backend with first end-to-end `hello-call` contract.
 
+**Architecture and telephony (for people and AI assistants):** see [`doc/README.md`](../doc/README.md) in the repo root.
+
 ## Stack
 - TypeScript (Node.js runtime)
 - Express.js API

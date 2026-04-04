@@ -1,5 +1,7 @@
 # ESL (Event Socket) in Kulloo
 
+> **Doc hub:** [Documentation index](../README.md) — inbound/outbound flows and FreeSWITCH config are sibling docs in `doc/telephony/`.
+
 This document explains **what ESL is**, **how Kulloo uses it**, and the **data flow** from FreeSWITCH to the Node backend and MongoDB. It is a conceptual guide; implementation details live in the source files referenced below.
 
 ---

@@ -1,5 +1,7 @@
 # Kulloo API Reference
 
+> **Doc hub:** [Documentation index](../README.md) — call flows and FreeSWITCH/ESL are under `doc/telephony/`.
+
 Base URL (production): `https://kulloocall.anuppradhan.in`
 
 All routes below are relative to the base URL.

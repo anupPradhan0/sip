@@ -1,5 +1,7 @@
 # Outbound calls (Kulloo)
 
+> **Doc hub:** [Documentation index](../README.md) — pair with [inbound-call-dataflow.md](./inbound-call-dataflow.md) and [esl.md](./esl.md).
+
 This document describes how **outbound PSTN** (and related) calls work in Kulloo: architecture, **data flow**, identifiers, MongoDB shape, FreeSWITCH/ESL behavior, and configuration. It matches the current backend under `backend/`.
 
 ---

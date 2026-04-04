@@ -1,5 +1,7 @@
 # Hello-Call Contract
 
+> **Doc hub:** [Documentation index](../README.md) — telephony and API details live under `doc/telephony/` and `doc/reference/`.
+
 ## Purpose
 Lock the first production-like call flow before larger architecture changes.
 

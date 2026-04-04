@@ -1,5 +1,7 @@
 # AI Calling Platform Requirements (TS + Mongo, Jambonz-Inspired)
 
+> **Doc hub:** [Documentation index](../README.md) — how this folder fits the rest of Kulloo.
+
 ## Purpose
 
 Define what we want to build: a production-ready AI calling platform inspired by the current Jambonz deployment architecture, reimplemented with TypeScript-first services and MongoDB as the primary data store, then integrated into Chati as an `AI Calling` module.
