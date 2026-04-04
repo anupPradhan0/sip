@@ -1,0 +1,68 @@
+.app {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem;
+  text-align: left;
+}
+
+.header {
+  margin-bottom: 1.5rem;
+}
+
+.header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0;
+  font-size: 0.95rem;
+  opacity: 0.75;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.main p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.btn {
+  align-self: flex-start;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+  color: CanvasText;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 10%, Canvas);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.result {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+  background: color-mix(in srgb, CanvasText 5%, Canvas);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
