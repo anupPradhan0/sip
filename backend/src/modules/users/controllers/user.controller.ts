@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { UserService } from "../services/user.service";
-import { parseWithSchema } from "../utils/zod-validate";
+import { parseWithSchema } from "../../../utils/zod-validate";
 import { createUserSchema, updateUserSchema, userIdParamSchema } from "../validators/user.schema";
 
 const userService = new UserService();

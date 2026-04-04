@@ -40,7 +40,7 @@ Passwords and TLS are supported via standard Redis URLs (e.g. `rediss://` for TL
 | [`backend/src/services/redis/webhook-dedupe.service.ts`](../backend/src/services/redis/webhook-dedupe.service.ts) | `SET key 1 EX ttl NX` per webhook identity. |
 | [`backend/src/modules/calls/services/call.service.ts`](../backend/src/modules/calls/services/call.service.ts) | `runOutboundHelloFlow`: cache read before Mongo; `setCachedCallId…` after Mongo hit or after `create`. |
 | [`backend/src/modules/calls/controllers/call.controller.ts`](../backend/src/modules/calls/controllers/call.controller.ts) | Recording callbacks call `claimRecordingWebhookOnce` before ingestion. |
-| [`backend/src/routes/health.routes.ts`](../backend/src/routes/health.routes.ts) | Redis `PING` when configured. |
+| [`backend/src/modules/health/routes/health.routes.ts`](../backend/src/modules/health/routes/health.routes.ts) | Redis `PING` when configured (via readiness service). |
 | [`backend/src/services/observability/metrics.service.ts`](../backend/src/services/observability/metrics.service.ts) | `redisIdempotencyHits`, `redisIdempotencyMisses`, `webhookDedupeSkips`. |
 
 ---

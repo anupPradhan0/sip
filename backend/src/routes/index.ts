@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { healthRouter } from "./health.routes";
+import { healthRouter } from "../modules/health/routes/health.routes";
 import { metricsRouter } from "./metrics.routes";
-import { userRouter } from "./user.routes";
+import { userRouter } from "../modules/users/routes/user.routes";
 import { callRouter, recordingRouter } from "../modules/calls/routes/call.routes";
 
 export const apiRouter = Router();

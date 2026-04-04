@@ -3,6 +3,8 @@
  * for easier searching in journals / log aggregators. Set LOG_FORMAT=pretty for human-readable.
  */
 
+import { env } from "../config/env";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LEVEL_RANK: Record<LogLevel, number> = {
@@ -13,7 +15,7 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 };
 
 function envLevel(): LogLevel {
-  const raw = process.env.LOG_LEVEL?.toLowerCase().trim();
+  const raw = env.logLevel?.toLowerCase().trim();
   if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") {
     return raw;
   }
@@ -23,7 +25,7 @@ function envLevel(): LogLevel {
 const minRank = () => LEVEL_RANK[envLevel()];
 
 function useJsonLines(): boolean {
-  if (process.env.LOG_FORMAT?.toLowerCase() === "pretty") return false;
+  if (env.logFormat?.toLowerCase() === "pretty") return false;
   return process.env.NODE_ENV === "production";
 }
 

@@ -10,7 +10,12 @@ import {
 import { CallEventRepository } from "../repositories/call-event.repository";
 import { CallRepository } from "../repositories/call.repository";
 import { RecordingRepository } from "../repositories/recording.repository";
-import { OutboundHelloInput } from "../validators/call.schema";
+import {
+  OutboundHelloInput,
+  PlivoRecordingCallbackPayload,
+  TwilioRecordingCallbackPayload,
+} from "../validators/call.schema";
+import { claimRecordingWebhookOnce } from "../../../services/redis/webhook-dedupe.service";
 import { TelephonyAdapter } from "../adapters/telephony.adapter";
 import { CallDocument, CallProvider, CallStatus } from "../models/call.model";
 import { RecordingDocument } from "../models/recording.model";
@@ -23,9 +28,9 @@ interface HelloFlowResult {
 }
 
 export class CallService {
-  public readonly callRepository = new CallRepository();
-  public readonly callEventRepository = new CallEventRepository();
-  public readonly recordingRepository = new RecordingRepository();
+  private readonly callRepository = new CallRepository();
+  private readonly callEventRepository = new CallEventRepository();
+  private readonly recordingRepository = new RecordingRepository();
   private readonly telephonyAdapter = new TelephonyAdapter();
 
   async runOutboundHelloFlow(payload: OutboundHelloInput, idempotencyKey: string): Promise<HelloFlowResult> {
@@ -361,12 +366,7 @@ export class CallService {
       retrievalUrl: `/api/recordings/local/${input.callUuid}`,
     });
 
-    await this.callEventRepository.create({
-      callId: call._id,
-      correlationId: call.correlationId,
-      eventType: "recording_completed",
-      payload: { providerRecordingId: input.callUuid },
-    });
+    await this.pushEvent(call, "recording_completed", { providerRecordingId: input.callUuid });
 
     return recording;
   }
@@ -395,5 +395,121 @@ export class CallService {
 
   private mapConnectedStatus(provider: CallProvider): CallStatus {
     return provider === "sip-local" ? "connected" : "connected";
+  }
+
+  async listLocalWavSummaries(): Promise<Array<{ uuid: string; filename: string; url: string }>> {
+    const dir = path.resolve(process.env.RECORDINGS_DIR ?? "/recordings");
+    let files: string[] = [];
+    try {
+      const entries = await fs.readdir(dir);
+      files = entries.filter((f) => f.endsWith(".wav"));
+    } catch {
+      // Directory not mounted or empty — return empty list.
+    }
+    return files.map((f) => ({
+      uuid: f.replace(/\.wav$/, ""),
+      filename: f,
+      url: `/api/recordings/local/${f.replace(/\.wav$/, "")}`,
+    }));
+  }
+
+  async resolveLocalRecordingAbsolutePath(uuidRaw: string): Promise<string> {
+    const uuid = uuidRaw?.replace(/\.wav$/i, "");
+    if (!uuid || !/^[\w-]+$/.test(uuid)) {
+      throw new ApiError("Invalid recording UUID", 400);
+    }
+    const dir = path.resolve(process.env.RECORDINGS_DIR ?? "/recordings");
+    const filePath = path.join(dir, `${uuid}.wav`);
+    try {
+      await fs.stat(filePath);
+    } catch {
+      throw new ApiError("Recording file not found", 404);
+    }
+    return filePath;
+  }
+
+  async processTwilioRecordingWebhook(
+    payload: TwilioRecordingCallbackPayload,
+  ): Promise<{ duplicate: true } | { duplicate: false; recording: RecordingDocument }> {
+    const first = await claimRecordingWebhookOnce("twilio", [payload.CallSid, payload.RecordingSid]);
+    if (!first) {
+      metrics.incCounter("webhookDedupeSkips");
+      return { duplicate: true };
+    }
+    const recording = await this.ingestTwilioRecordingCallback(payload);
+    return { duplicate: false, recording };
+  }
+
+  async processPlivoRecordingWebhook(
+    callUuid: string,
+    payload: PlivoRecordingCallbackPayload,
+  ): Promise<{ duplicate: true } | { duplicate: false; recording: RecordingDocument }> {
+    const first = await claimRecordingWebhookOnce("plivo", [callUuid, payload.RecordingID]);
+    if (!first) {
+      metrics.incCounter("webhookDedupeSkips");
+      return { duplicate: true };
+    }
+    const recording = await this.ingestPlivoRecordingCallback(callUuid, payload);
+    return { duplicate: false, recording };
+  }
+
+  async processFreeswitchRecordingWebhook(input: {
+    callUuid: string;
+    durationSec?: number;
+    from?: string;
+    to?: string;
+  }): Promise<{ duplicate: true } | { duplicate: false; recording: RecordingDocument }> {
+    const first = await claimRecordingWebhookOnce("freeswitch", [input.callUuid]);
+    if (!first) {
+      metrics.incCounter("webhookDedupeSkips");
+      return { duplicate: true };
+    }
+    const recording = await this.registerFreeswitchRecordingFromCallback(input);
+    return { duplicate: false, recording };
+  }
+
+  // --- ESL / FreeSWITCH: delegate persistence without exposing repositories ---
+
+  async findCallDocumentById(callId: string): Promise<CallDocument | null> {
+    return this.callRepository.findById(callId);
+  }
+
+  async findCallDocumentByStableCallId(stableCallId: string): Promise<CallDocument | null> {
+    return this.callRepository.findByStableCallId(stableCallId);
+  }
+
+  async updateCallDocument(id: string, patch: Partial<CallDocument>): Promise<CallDocument | null> {
+    return this.callRepository.updateById(id, patch);
+  }
+
+  async findOrCreateCallByProviderCallId(
+    provider: CallProvider,
+    providerCallId: string,
+    payload: Omit<CallDocument, "_id" | "createdAt" | "updatedAt">,
+  ): Promise<{ call: CallDocument; created: boolean }> {
+    return this.callRepository.findOrCreateByProviderCallId(provider, providerCallId, payload);
+  }
+
+  async findCallDocumentByProviderCallId(providerCallId: string): Promise<CallDocument | null> {
+    return this.callRepository.findByProviderCallId(providerCallId);
+  }
+
+  async findRecordingDocumentByProviderRecordingId(
+    providerRecordingId: string,
+  ): Promise<RecordingDocument | null> {
+    return this.recordingRepository.findByProviderRecordingId(providerRecordingId);
+  }
+
+  async updateRecordingDocument(
+    id: string,
+    patch: Parameters<RecordingRepository["updateById"]>[1],
+  ): Promise<RecordingDocument | null> {
+    return this.recordingRepository.updateById(id, patch);
+  }
+
+  async createRecordingDocument(
+    payload: Omit<RecordingDocument, "_id" | "createdAt" | "updatedAt">,
+  ): Promise<RecordingDocument> {
+    return this.recordingRepository.create(payload);
   }
 }

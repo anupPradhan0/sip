@@ -58,4 +58,28 @@ export class RecordingRepository {
     }
     return RecordingModel.findOne({ callId, status: "pending" }).sort({ createdAt: -1 });
   }
+
+  async upsertFreeswitchRecordingFromDiskSync(input: {
+    providerRecordingId: string;
+    callId: Types.ObjectId;
+    filePath: string;
+    retrievalUrl: string;
+  }): Promise<void> {
+    await RecordingModel.updateOne(
+      { providerRecordingId: input.providerRecordingId },
+      {
+        $setOnInsert: {
+          callId: input.callId,
+          provider: "freeswitch",
+          providerRecordingId: input.providerRecordingId,
+        },
+        $set: {
+          status: "completed",
+          filePath: input.filePath,
+          retrievalUrl: input.retrievalUrl,
+        },
+      },
+      { upsert: true },
+    );
+  }
 }

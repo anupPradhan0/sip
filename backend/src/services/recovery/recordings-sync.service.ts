@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CallModel } from "../../modules/calls/models/call.model";
-import { RecordingModel } from "../../modules/calls/models/recording.model";
+import { CallRepository } from "../../modules/calls/repositories/call.repository";
+import { RecordingRepository } from "../../modules/calls/repositories/recording.repository";
 import { logger } from "../../utils/logger";
 
 export interface RecordingsSyncOptions {
@@ -15,6 +15,8 @@ export interface RecordingsSyncOptions {
 export class RecordingsSyncService {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private readonly callRepository = new CallRepository();
+  private readonly recordingRepository = new RecordingRepository();
 
   constructor(private readonly opts: RecordingsSyncOptions) {}
 
@@ -37,39 +39,27 @@ export class RecordingsSyncService {
         const uuid = filename.replace(/\.wav$/i, "");
         const filePath = path.join(dir, filename);
 
-        // Skip very recent files (still being written)
         try {
           const st = await fs.stat(filePath);
           if (st.mtime > cutoff) continue;
-          if (st.size <= 44) continue; // WAV header only or empty
+          if (st.size <= 44) continue;
         } catch {
           continue;
         }
 
-        const call = await CallModel.findOne({ provider: "freeswitch", providerCallId: uuid });
+        const call = await this.callRepository.findFreeswitchCallByChannelUuid(uuid);
         if (!call) continue;
 
         const retrievalUrl = this.opts.publicBaseUrl
           ? `${this.opts.publicBaseUrl.replace(/\/+$/, "")}/api/recordings/local/${uuid}`
           : `/api/recordings/local/${uuid}`;
 
-        // Upsert recording metadata keyed by providerRecordingId (unique).
-        await RecordingModel.updateOne(
-          { providerRecordingId: uuid },
-          {
-            $setOnInsert: {
-              callId: call._id,
-              provider: "freeswitch",
-              providerRecordingId: uuid,
-            },
-            $set: {
-              status: "completed",
-              filePath,
-              retrievalUrl,
-            },
-          },
-          { upsert: true },
-        );
+        await this.recordingRepository.upsertFreeswitchRecordingFromDiskSync({
+          providerRecordingId: uuid,
+          callId: call._id,
+          filePath,
+          retrievalUrl,
+        });
       }
     } finally {
       this.running = false;
@@ -80,8 +70,7 @@ export class RecordingsSyncService {
     if (this.timer) return;
     if (this.opts.sweepIntervalMs <= 0) return;
     this.timer = setInterval(() => {
-      this.runOnce("interval").catch((err) => {
-        // eslint-disable-next-line no-console
+      this.runOnce("interval").catch((err: unknown) => {
         logger.error("recordings_sync_sweep_failed", { err });
       });
     }, this.opts.sweepIntervalMs);
@@ -93,4 +82,3 @@ export class RecordingsSyncService {
     this.timer = null;
   }
 }
-

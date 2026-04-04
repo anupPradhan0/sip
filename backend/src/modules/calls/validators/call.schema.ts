@@ -44,3 +44,6 @@ export const freeswitchRecordingCallbackSchema = z.object({
 });
 
 export type OutboundHelloInput = z.infer<typeof outboundHelloSchema>;
+export type TwilioRecordingCallbackPayload = z.infer<typeof twilioRecordingCallbackSchema>;
+export type PlivoRecordingCallbackPayload = z.infer<typeof plivoRecordingCallbackSchema>;
+export type FreeswitchRecordingCallbackPayload = z.infer<typeof freeswitchRecordingCallbackSchema>;

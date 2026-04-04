@@ -23,6 +23,18 @@ export const env = {
   redisKeyPrefix: process.env.REDIS_KEY_PREFIX?.trim() || "kulloo:",
   redisIdempotencyTtlSec: parseIntEnv("REDIS_IDEMPOTENCY_TTL_SEC", 86_400),
   redisWebhookDedupeTtlSec: parseIntEnv("REDIS_WEBHOOK_DEDUPE_TTL_SEC", 172_800),
+  /** Optional override for absolute URLs (Plivo callbacks, recording links). */
+  publicBaseUrl: process.env.PUBLIC_BASE_URL?.trim() || undefined,
+  /** Target for Plivo Dial toward FreeSWITCH (SIP URI). */
+  freeswitchSipUri: process.env.FREESWITCH_SIP_URI?.trim() || undefined,
+  logLevel: process.env.LOG_LEVEL?.trim() || undefined,
+  logFormat: process.env.LOG_FORMAT?.trim() || undefined,
+  twilioAccountSid: process.env.TWILIO_ACCOUNT_SID?.trim() || undefined,
+  twilioAuthToken: process.env.TWILIO_AUTH_TOKEN?.trim() || undefined,
+  plivoAuthId: process.env.PLIVO_AUTH_ID?.trim() || undefined,
+  plivoAuthToken: process.env.PLIVO_AUTH_TOKEN?.trim() || undefined,
+  plivoAnswerUrl: process.env.PLIVO_ANSWER_URL?.trim() || undefined,
+  plivoHangupUrl: process.env.PLIVO_HANGUP_URL?.trim() || undefined,
 };
 
 export function isRedisConfigured(): boolean {

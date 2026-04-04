@@ -1,3 +1,4 @@
+import { env } from "../../../config/env";
 import { ApiError } from "../../../utils/api-error";
 import { CallProvider } from "../models/call.model";
 
@@ -60,8 +61,8 @@ export class TelephonyAdapter {
   }
 
   private async executeTwilioHello(input: OutboundExecutionInput): Promise<OutboundExecutionResult> {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const accountSid = env.twilioAccountSid;
+    const authToken = env.twilioAuthToken;
 
     if (!accountSid || !authToken) {
       throw new ApiError("Missing Twilio credentials for provider=twilio", 400);
@@ -95,10 +96,10 @@ export class TelephonyAdapter {
   }
 
   private async executePlivoHello(input: OutboundExecutionInput): Promise<OutboundExecutionResult> {
-    const authId = process.env.PLIVO_AUTH_ID;
-    const authToken = process.env.PLIVO_AUTH_TOKEN;
-    const answerUrl = process.env.PLIVO_ANSWER_URL;
-    const hangupUrl = process.env.PLIVO_HANGUP_URL;
+    const authId = env.plivoAuthId;
+    const authToken = env.plivoAuthToken;
+    const answerUrl = env.plivoAnswerUrl;
+    const hangupUrl = env.plivoHangupUrl;
 
     if (!authId || !authToken) {
       throw new ApiError("Missing Plivo credentials for provider=plivo", 400);

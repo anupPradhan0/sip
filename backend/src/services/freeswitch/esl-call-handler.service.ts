@@ -294,7 +294,7 @@ export class EslCallHandlerService {
       }
 
       try {
-        const call = await this.callService.callRepository.findById(input.callId);
+        const call = await this.callService.findCallDocumentById(input.callId);
         if (call) {
           await this.callService.pushEvent(call, "failed", { stage: input.stage, error: message });
         }
@@ -338,7 +338,7 @@ export class EslCallHandlerService {
 
       this.log({ callId: stableCallId }, "info", `DTMF received: ${d}`);
       metrics.incCounter("dtmfCount");
-      this.callService.callRepository.findByStableCallId(stableCallId).then((call) => {
+      this.callService.findCallDocumentByStableCallId(stableCallId).then((call) => {
         if (!call) return;
         return this.callService.pushEvent(call, "dtmf", { digit: d, at: new Date().toISOString() });
       }).catch((err) => {
@@ -608,10 +608,10 @@ export class EslCallHandlerService {
       let created = false;
       const kullooCallId = input.kullooCallId && typeof input.kullooCallId === "string" ? input.kullooCallId : null;
       if (kullooCallId && /^[a-fA-F0-9]{24}$/.test(kullooCallId)) {
-        const existing = await this.callService.callRepository.findByStableCallId(kullooCallId);
+        const existing = await this.callService.findCallDocumentByStableCallId(kullooCallId);
         if (existing) {
           // Keep API `from` / `to` (dialed PSTN); FreeSWITCH often reports extension (e.g. 1000) as destination_number.
-          const updated = await this.callService.callRepository.updateById(existing._id.toString(), {
+          const updated = await this.callService.updateCallDocument(existing._id.toString(), {
             provider: "freeswitch",
             providerCallId: input.callUuid,
             direction: "outbound",
@@ -628,7 +628,7 @@ export class EslCallHandlerService {
       }
 
       if (!call) {
-        const result = await this.callService.callRepository.findOrCreateByProviderCallId(
+        const result = await this.callService.findOrCreateCallByProviderCallId(
           "freeswitch",
           input.callUuid,
           {
@@ -697,15 +697,15 @@ export class EslCallHandlerService {
       // even if the backend restarts before RECORD_STOP is processed.
       const providerRecordingId = input.callUuid;
       const retrievalUrl = `/api/recordings/local/${providerRecordingId}`;
-      const existingRecording = await this.callService.recordingRepository.findByProviderRecordingId(providerRecordingId);
+      const existingRecording = await this.callService.findRecordingDocumentByProviderRecordingId(providerRecordingId);
       if (existingRecording) {
-        await this.callService.recordingRepository.updateById(existingRecording._id.toString(), {
+        await this.callService.updateRecordingDocument(existingRecording._id.toString(), {
           status: "pending",
           filePath: recordingPath,
           retrievalUrl,
         });
       } else {
-        await this.callService.recordingRepository.create({
+        await this.callService.createRecordingDocument({
           callId: call._id,
           provider: "freeswitch",
           providerRecordingId,
@@ -770,7 +770,7 @@ export class EslCallHandlerService {
       // Handle failure: update DB + hangup; then rethrow so upstream logs also capture it.
       // Note: at this point we should always have a callId because we create/find it early.
       try {
-        const existing = await this.callService.callRepository.findByProviderCallId(input.callUuid);
+        const existing = await this.callService.findCallDocumentByProviderCallId(input.callUuid);
         await this.failAndHangup({
           conn,
           callId: existing?._id?.toString(),
@@ -788,7 +788,7 @@ export class EslCallHandlerService {
     try {
       const filePath = path.join(this.recordingsDir, `${callUuid}.wav`);
       
-      const call = await this.callService.callRepository.findByStableCallId(callId);
+      const call = await this.callService.findCallDocumentByStableCallId(callId);
       if (!call) {
         this.log({ callId, uuid: callUuid }, "error", "Call not found for recording completion");
         return;
@@ -810,18 +810,18 @@ export class EslCallHandlerService {
         await new Promise((r) => setTimeout(r, 200 * attempt));
       }
 
-      const existing = await this.callService.recordingRepository.findByProviderRecordingId(callUuid);
+      const existing = await this.callService.findRecordingDocumentByProviderRecordingId(callUuid);
 
       if (!st) {
         // If the file never materialized (early hangup/crash), mark recording failed but keep the row.
         if (existing) {
-          await this.callService.recordingRepository.updateById(existing._id.toString(), {
+          await this.callService.updateRecordingDocument(existing._id.toString(), {
             status: "failed",
             filePath,
             retrievalUrl: `/api/recordings/local/${callUuid}`,
           });
         } else {
-          await this.callService.recordingRepository.create({
+          await this.callService.createRecordingDocument({
             callId: call._id,
             provider: "freeswitch",
             providerRecordingId: callUuid,
@@ -830,11 +830,9 @@ export class EslCallHandlerService {
             retrievalUrl: `/api/recordings/local/${callUuid}`,
           });
         }
-        await this.callService.callEventRepository.create({
-          callId: call._id,
-          correlationId: call.correlationId,
-          eventType: "recording_failed",
-          payload: { providerRecordingId: callUuid, reason: "file_missing_or_empty" },
+        await this.callService.pushEvent(call, "recording_failed", {
+          providerRecordingId: callUuid,
+          reason: "file_missing_or_empty",
         });
         metrics.incCounter("recordingFailed");
         this.log(
@@ -852,18 +850,17 @@ export class EslCallHandlerService {
         retrievalUrl: `/api/recordings/local/${callUuid}`,
       };
 
-      const recording =
-        existing
-          ? await this.callService.recordingRepository.updateById(existing._id.toString(), patch)
-          : await this.callService.recordingRepository.create({
-              callId: call._id,
-              provider: "freeswitch",
-              providerRecordingId: callUuid,
-              status: "completed",
-              durationSec: 20,
-              filePath,
-              retrievalUrl: `/api/recordings/local/${callUuid}`,
-            });
+      const recording = existing
+        ? await this.callService.updateRecordingDocument(existing._id.toString(), patch)
+        : await this.callService.createRecordingDocument({
+            callId: call._id,
+            provider: "freeswitch",
+            providerRecordingId: callUuid,
+            status: "completed",
+            durationSec: 20,
+            filePath,
+            retrievalUrl: `/api/recordings/local/${callUuid}`,
+          });
 
       if (!recording) {
         this.log(
@@ -876,11 +873,9 @@ export class EslCallHandlerService {
 
       // Only emit completion event once (avoid duplicates on retries).
       if (!existing || existing.status !== "completed") {
-        await this.callService.callEventRepository.create({
-          callId: call._id,
-          correlationId: call.correlationId,
-          eventType: "recording_completed",
-          payload: { providerRecordingId: callUuid, recordingId: recording._id.toString() },
+        await this.callService.pushEvent(call, "recording_completed", {
+          providerRecordingId: callUuid,
+          recordingId: recording._id.toString(),
         });
       }
 

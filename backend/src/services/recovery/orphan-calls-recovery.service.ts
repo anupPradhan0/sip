@@ -1,4 +1,4 @@
-import { CallModel } from "../../modules/calls/models/call.model";
+import { CallRepository } from "../../modules/calls/repositories/call.repository";
 import { logger } from "../../utils/logger";
 
 export interface OrphanRecoveryOptions {
@@ -30,9 +30,12 @@ const NON_TERMINAL_STATUSES: NonTerminalStatus[] = [
   "hangup",
 ];
 
+const STATUSES_TO_FAIL = NON_TERMINAL_STATUSES.filter((s) => s !== "hangup");
+
 export class OrphanCallsRecoveryService {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private readonly callRepository = new CallRepository();
 
   constructor(private readonly opts: OrphanRecoveryOptions) {}
 
@@ -44,40 +47,8 @@ export class OrphanCallsRecoveryService {
       const activeSet =
         reason === "interval" ? this.opts.getActiveProviderCallIds?.() : undefined;
 
-      // Mark stale hangup calls as completed.
-      await CallModel.updateMany(
-        {
-          status: "hangup",
-          updatedAt: { $lt: cutoff },
-          ...(activeSet && activeSet.size
-            ? { providerCallId: { $nin: Array.from(activeSet) } }
-            : {}),
-        },
-        {
-          $set: {
-            status: "completed",
-            "timestamps.completedAt": new Date(),
-          },
-        },
-      );
-
-      // Mark all other stale non-terminal calls as failed.
-      await CallModel.updateMany(
-        {
-          status: { $in: NON_TERMINAL_STATUSES.filter((s) => s !== "hangup") },
-          updatedAt: { $lt: cutoff },
-          ...(activeSet && activeSet.size
-            ? { providerCallId: { $nin: Array.from(activeSet) } }
-            : {}),
-        },
-        {
-          $set: {
-            status: "failed",
-            "timestamps.failedAt": new Date(),
-            lastError: "orphaned after backend restart",
-          },
-        },
-      );
+      await this.callRepository.sweepStaleHangupToCompleted(cutoff, activeSet);
+      await this.callRepository.sweepStaleNonTerminalToFailed(cutoff, activeSet, STATUSES_TO_FAIL);
     } finally {
       this.running = false;
     }
@@ -99,4 +70,3 @@ export class OrphanCallsRecoveryService {
     this.timer = null;
   }
 }
-

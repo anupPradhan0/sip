@@ -1,4 +1,4 @@
-import { ApiError } from "../utils/api-error";
+import { ApiError } from "../../../utils/api-error";
 import { UserRepository } from "../repositories/user.repository";
 import { UserDocument } from "../models/user.model";
 

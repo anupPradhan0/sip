@@ -84,4 +84,48 @@ export class CallRepository {
     const { _id, createdAt, updatedAt, ...safePatch } = patch as Record<string, unknown>;
     return CallModel.findByIdAndUpdate(id, safePatch, { new: true, runValidators: true });
   }
+
+  async findFreeswitchCallByChannelUuid(channelUuid: string): Promise<CallDocument | null> {
+    return CallModel.findOne({ provider: "freeswitch", providerCallId: channelUuid });
+  }
+
+  async sweepStaleHangupToCompleted(
+    cutoff: Date,
+    excludeProviderCallIds?: ReadonlySet<string>,
+  ): Promise<void> {
+    const filter: Record<string, unknown> = {
+      status: "hangup",
+      updatedAt: { $lt: cutoff },
+    };
+    if (excludeProviderCallIds && excludeProviderCallIds.size > 0) {
+      filter.providerCallId = { $nin: [...excludeProviderCallIds] };
+    }
+    await CallModel.updateMany(filter, {
+      $set: {
+        status: "completed",
+        "timestamps.completedAt": new Date(),
+      },
+    });
+  }
+
+  async sweepStaleNonTerminalToFailed(
+    cutoff: Date,
+    excludeProviderCallIds: ReadonlySet<string> | undefined,
+    statuses: readonly string[],
+  ): Promise<void> {
+    const filter: Record<string, unknown> = {
+      status: { $in: [...statuses] },
+      updatedAt: { $lt: cutoff },
+    };
+    if (excludeProviderCallIds && excludeProviderCallIds.size > 0) {
+      filter.providerCallId = { $nin: [...excludeProviderCallIds] };
+    }
+    await CallModel.updateMany(filter, {
+      $set: {
+        status: "failed",
+        "timestamps.failedAt": new Date(),
+        lastError: "orphaned after backend restart",
+      },
+    });
+  }
 }
